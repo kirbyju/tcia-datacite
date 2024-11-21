@@ -1,5 +1,11 @@
 import streamlit as st
 import pandas as pd
+from pandas.api.types import (
+    is_object_dtype,
+    is_categorical_dtype,
+    is_numeric_dtype,
+    is_datetime64_any_dtype
+)
 import requests
 from tcia_utils import datacite
 import plotly.express as px
@@ -80,6 +86,82 @@ def parse_xml(xml_file):
 
     return df
 
+def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Adds a UI on top of a dataframe to let viewers filter columns
+
+    Args:
+        df (pd.DataFrame): Original dataframe
+
+    Returns:
+        pd.DataFrame: Filtered dataframe
+    """
+    modify = st.checkbox("Add filters")
+
+    if not modify:
+        return df
+
+    df = df.copy()
+
+    # Try to convert datetimes into a standard format (datetime, no timezone)
+    for col in df.columns:
+        if is_object_dtype(df[col]):
+            try:
+                df[col] = pd.to_datetime(df[col])
+            except Exception:
+                pass
+
+        if is_datetime64_any_dtype(df[col]):
+            df[col] = df[col].dt.tz_localize(None)
+
+    modification_container = st.container()
+
+    with modification_container:
+        to_filter_columns = st.multiselect("Filter dataframe on", df.columns)
+        for column in to_filter_columns:
+            left, right = st.columns((1, 20))
+            left.write("↳")
+            # Treat columns with < 10 unique values as categorical
+            if is_categorical_dtype(df[column]) or df[column].nunique() < 10:
+                user_cat_input = right.multiselect(
+                    f"Values for {column}",
+                    df[column].unique(),
+                    default=list(df[column].unique()),
+                )
+                df = df[df[column].isin(user_cat_input)]
+            elif is_numeric_dtype(df[column]):
+                _min = float(df[column].min())
+                _max = float(df[column].max())
+                step = (_max - _min) / 100
+                user_num_input = right.slider(
+                    f"Values for {column}",
+                    _min,
+                    _max,
+                    (_min, _max),
+                    step=step,
+                )
+                df = df[df[column].between(*user_num_input)]
+            elif is_datetime64_any_dtype(df[column]):
+                user_date_input = right.date_input(
+                    f"Values for {column}",
+                    value=(
+                        df[column].min(),
+                        df[column].max(),
+                    ),
+                )
+                if len(user_date_input) == 2:
+                    user_date_input = tuple(map(pd.to_datetime, user_date_input))
+                    start_date, end_date = user_date_input
+                    df = df.loc[df[column].between(start_date, end_date)]
+            else:
+                user_text_input = right.text_input(
+                    f"Substring or regex in {column}",
+                )
+                if user_text_input:
+                    df = df[df[column].str.contains(user_text_input)]
+
+    return df
+
 # load endnote dataset
 @st.cache_data
 def load_endnote_data():
@@ -105,12 +187,14 @@ def create_app():
         page = st.radio("Select View", [
             "Dataset Citations by Year",
             "Citations and Page Views by Dataset",
-            "Views vs Citations Scatter Plot"
+            "Views vs Citations Scatter Plot",
+            "Citation Explorer"
         ])
 
     # Main content area
     st.title("TCIA Data Usage Statistics")
-    st.write("Explore citation counts and page views for TCIA datasets.  Select from the available reports in the left sidebar.")
+    st.markdown("Explore citation counts and page views for TCIA datasets.  Select from the available reports in the left sidebar.")
+    st.markdown("You can download an Endnote XML file containing all of our known citations of TCIA datasets [here](https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml).")
 
     # Load endnote pubs data
     pubs_df = load_endnote_data()
@@ -122,8 +206,7 @@ def create_app():
         st.error(f"Error loading data: {str(e)}")
         return
 
-    st.caption("Tip: Use the zoom and pan tools in the plot toolbar to explore specific regions")
-
+    st.caption("Tip: Plots are interactive. Controls can be found at the top right corner of each plot.  Tables can be exported to CSV files.")
     # Conditional rendering based on sidebar selection
     if page == "Dataset Citations by Year":
         # Count publications per year
@@ -202,7 +285,7 @@ def create_app():
         st.plotly_chart(fig_citations, use_container_width=True)
 
         # Interactive table with citation details
-        st.subheader("Citation Details")
+        st.subheader("Page View and Citation Details")
 
         # Create a dataframe for display
         display_df = df[['Identifier', 'Title', 'CitationCount', 'ViewCount', 'URL', 'Rights']].copy()
@@ -241,6 +324,9 @@ def create_app():
 
         fig.update_layout(height=600)
         st.plotly_chart(fig, use_container_width=True)
+
+    elif page == "Citation Explorer":
+        st.dataframe(filter_dataframe(pubs_df), hide_index = True)
 
 if __name__ == "__main__":
     create_app()
