@@ -188,7 +188,8 @@ def create_app():
             "Dataset Citations by Year",
             "Citations and Page Views by Dataset",
             "Views vs Citations Scatter Plot",
-            "Citation Explorer"
+            "Endnote Citation Explorer",
+            "DataCite Metadata Explorer"
         ])
 
     # Main content area
@@ -223,12 +224,12 @@ def create_app():
         # Rename the index to make it more descriptive
         df_totals.index.name = 'Metric'
 
+        st.subheader("Dataset Citations Over Time")
         # Create the chart
         fig = go.Figure()
         fig.add_trace(go.Bar(x=pubs_per_year.index, y=pubs_per_year.values, name='Publications per Year'))
         fig.add_trace(go.Scatter(x=cumulative_pubs.index, y=cumulative_pubs.values, mode='lines+markers', name='Cumulative Publications', yaxis='y2'))
         fig.update_layout(
-            title='Dataset Citations Over Time',
             xaxis_title='Year',
             yaxis=dict(title='Number of Citations'),
             yaxis2=dict(title='Cumulative Citations', overlaying='y', side='right'),
@@ -325,8 +326,13 @@ def create_app():
         fig.update_layout(height=600)
         st.plotly_chart(fig, use_container_width=True)
 
-    elif page == "Citation Explorer":
+    elif page == "Endnote Citation Explorer":
+        st.subheader("Endnote Citations")
         st.dataframe(filter_dataframe(pubs_df), hide_index = True)
+
+    elif page == "DataCite Metadata Explorer":
+        st.subheader("DataCite DOI Metadata")
+        st.dataframe(filter_dataframe(df), hide_index = True)
 
 if __name__ == "__main__":
     create_app()
