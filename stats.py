@@ -8,7 +8,7 @@ from pandas.api.types import (
 )
 import requests
 import os
-import datetime
+import time
 from tcia_utils import datacite
 import plotly.express as px
 import plotly.graph_objects as go
@@ -17,11 +17,55 @@ import xml.etree.ElementTree as ET
 
 st.set_page_config(page_title="TCIA Data Usage Statistics", layout="wide")
 
+# TTL and Cache Time Management
+def should_refresh_cache(ttl: int = 86400):
+    """
+    Determine whether to refresh the cache based on a TTL (time-to-live).
+    Default TTL is 1 day (86400 seconds).
+    """
+    cache_time_file = "cache_time.txt"
+
+    # Check the timestamp of the last cache
+    if not os.path.exists(cache_time_file):
+        with open(cache_time_file, "w") as f:
+            f.write(str(time.time()))
+        return True  # No cache exists, so refresh
+
+    with open(cache_time_file, "r") as f:
+        last_cache_time = float(f.read().strip())
+
+    # Check if TTL has expired
+    if time.time() - last_cache_time > ttl:
+        # Update the cache time
+        with open(cache_time_file, "w") as f:
+            f.write(str(time.time()))
+        return True  # TTL expired, so refresh
+
+    return False  # TTL not expired, no need to refresh
+
+# Endnote XML Data Loader
+@st.cache_data
+def load_endnote_data():
+    url = "https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml"
+    response = requests.get(url)
+    if response.status_code == 200:
+        with open("Pubs_basedon_TCIA.xml", "wb") as f:
+            f.write(response.content)
+
+    endnote = parse_xml('Pubs_basedon_TCIA.xml')
+    endnote['electronic-resource-num'] = endnote['electronic-resource-num'].str.strip()
+    return endnote
+
+# Datacite Data Loader
 @st.cache_data
 def load_data():
     """Load TCIA dataset information using datacite"""
     df = datacite.getDoi()
     return df
+
+# Refresh cache based on TTL
+if should_refresh_cache(ttl=86400):  # Set TTL to 1 day
+    st.cache_data.clear()  # Clear cache for all functions
 
 # helper functions for parsing the Endnote library to a dataframe
 def replace_newline(s):
@@ -164,40 +208,6 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-# check for updates to endnote xml and load dataset
-@st.cache_data
-def load_endnote_data():
-    url = "https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml"
-    metadata_file = "endnote_metadata.txt"
-    local_file = "Pubs_basedon_TCIA.xml"
-
-    # Check for metadata file
-    last_modified = None
-    if os.path.exists(metadata_file):
-        with open(metadata_file, "r") as f:
-            last_modified = f.read().strip()
-
-    # Make a HEAD request to check for updates
-    response = requests.head(url)
-    server_last_modified = response.headers.get("Last-Modified")
-
-    # Redownload if server file is newer
-    if server_last_modified != last_modified:
-        response = requests.get(url)
-        if response.status_code == 200:
-            with open(local_file, "wb") as f:
-                f.write(response.content)
-            # Save new metadata
-            with open(metadata_file, "w") as f:
-                f.write(server_last_modified or "")
-        else:
-            st.error(f"Failed to download file: {response.status_code}")
-
-    # Load and parse the XML file
-    endnote = parse_xml(local_file)
-    endnote['electronic-resource-num'] = endnote['electronic-resource-num'].str.strip()
-    return endnote
-
 def create_app():
     # Sidebar for navigation and logo
     with st.sidebar:
@@ -213,12 +223,17 @@ def create_app():
             "DataCite Metadata Explorer"
         ])
 
+        # Add manual refresh button
+        st.markdown("Source data refreshes daily, but can be manually updated using this button.")
+        if st.button("Refresh All Data"):
+            st.cache_data.clear()  # Clear cache for all functions
+
     # Main content area
     st.title("TCIA Data Usage Statistics")
     st.markdown("Explore citation counts and page views for TCIA datasets.  Select from the available reports in the left sidebar.")
     st.markdown("You can download an Endnote XML file containing all of our known citations of TCIA datasets [here](https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml).")
 
-    # Load endnote pubs data
+    # Load endnote data
     pubs_df = load_endnote_data()
 
     # Load datacite data
