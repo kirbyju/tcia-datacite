@@ -7,6 +7,8 @@ from pandas.api.types import (
     is_datetime64_any_dtype
 )
 import requests
+import os
+import datetime
 from tcia_utils import datacite
 import plotly.express as px
 import plotly.graph_objects as go
@@ -162,18 +164,37 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-# load endnote dataset
+# check for updates to endnote xml and load dataset
 @st.cache_data
 def load_endnote_data():
     url = "https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml"
-    response = requests.get(url)
-    if response.status_code == 200:
-        with open("Pubs_basedon_TCIA.xml", "wb") as f:
-            f.write(response.content)
+    metadata_file = "endnote_metadata.txt"
+    local_file = "Pubs_basedon_TCIA.xml"
 
-    endnote = parse_xml('Pubs_basedon_TCIA.xml')
+    # Check for metadata file
+    last_modified = None
+    if os.path.exists(metadata_file):
+        with open(metadata_file, "r") as f:
+            last_modified = f.read().strip()
 
-    # remove any leading/trailing spaces
+    # Make a HEAD request to check for updates
+    response = requests.head(url)
+    server_last_modified = response.headers.get("Last-Modified")
+
+    # Redownload if server file is newer
+    if server_last_modified != last_modified:
+        response = requests.get(url)
+        if response.status_code == 200:
+            with open(local_file, "wb") as f:
+                f.write(response.content)
+            # Save new metadata
+            with open(metadata_file, "w") as f:
+                f.write(server_last_modified or "")
+        else:
+            st.error(f"Failed to download file: {response.status_code}")
+
+    # Load and parse the XML file
+    endnote = parse_xml(local_file)
     endnote['electronic-resource-num'] = endnote['electronic-resource-num'].str.strip()
     return endnote
 
@@ -225,6 +246,7 @@ def create_app():
         df_totals.index.name = 'Metric'
 
         st.subheader("Dataset Citations Over Time")
+        st.metric("Total Citations", len(pubs_df))
         # Create the chart
         fig = go.Figure()
         fig.add_trace(go.Bar(x=pubs_per_year.index, y=pubs_per_year.values, name='Publications per Year'))
@@ -328,11 +350,11 @@ def create_app():
 
     elif page == "Endnote Citation Explorer":
         st.subheader("Endnote Citations")
-        st.dataframe(filter_dataframe(pubs_df), hide_index = True)
+        st.dataframe(filter_dataframe(pubs_df))
 
     elif page == "DataCite Metadata Explorer":
         st.subheader("DataCite DOI Metadata")
-        st.dataframe(filter_dataframe(df), hide_index = True)
+        st.dataframe(filter_dataframe(df))
 
 if __name__ == "__main__":
     create_app()
