@@ -63,6 +63,66 @@ def load_data():
     df = datacite.getDoi()
     return df
 
+# Function to fetch DICOM data
+@st.cache_data
+def load_dicom_downloads():
+    #url = "https://cancerimagingarchive.net/downloads_dicom.csv"
+    url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_dicom.csv"
+    df = pd.read_csv(url)
+
+    # Remove any unnamed columns that might be causing issues
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+
+    # Reshape the data
+    df_long = pd.melt(
+        df,
+        id_vars=["Collection"],  # Keep 'Collection' as-is
+        var_name="Date",         # Create a 'Date' column from column headers
+        value_name="Bytes (GB)"  # Create a 'Bytes (GB)' column from values
+    )
+
+    # rename column
+    df_long.rename(columns={"Bytes (GB)": "Downloads"}, inplace=True)
+
+    # Convert 'Date' column to datetime -- YYYY-MM-DD
+    df_long["Date"] = pd.to_datetime(df_long["Date"], errors="coerce")
+
+    # Ensure required columns exist
+    if 'Date' not in df_long.columns or 'Downloads' not in df_long.columns:
+        st.error("Expected columns 'Date' and 'Downloads' not found in the data.")
+        st.stop()
+
+    # Drop rows with invalid or missing dates (if any)
+    df_long = df_long.dropna(subset=["Date"])
+
+    # Handle missing or invalid data in 'Downloads'
+    df_long['Downloads'].fillna(0, inplace=True)  # Replace NaN with 0 for summation
+
+    # Function to clean and convert the Downloads column
+    def clean_downloads(value):
+        try:
+            # Remove commas and convert to float
+            return float(value.replace(',', ''))
+        except AttributeError:
+            # If there are no commas, directly convert to float
+            return float(value)
+
+    # Apply the cleaning function to the Downloads
+    df_long["Downloads"] = df_long["Downloads"].apply(clean_downloads)
+
+    # Drop rows where 'Downloads' is 0
+    df_long = df_long[df_long["Downloads"] != 0]
+
+    return df_long
+
+# function to fetch DICOM collection stats
+@st.cache_data
+def load_dicom_collection_report():
+    # ingest summary CSV output of nbia.reportCollectionSummary(series, format = "csv")
+    url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/tcia_collection_report.csv"
+    df_sizes = pd.read_csv(url)
+    return df_sizes
+
 # Refresh cache based on TTL
 if should_refresh_cache(ttl=86400):  # Set TTL to 1 day
     st.cache_data.clear()  # Clear cache for all functions
@@ -218,7 +278,7 @@ def create_app():
         page = st.radio("Select View", [
             "Dataset Citations by Year",
             "Citations and Page Views by Dataset",
-            "Views vs Citations Scatter Plot",
+            "Downloads (DICOM Data)",
             "Endnote Citation Explorer",
             "DataCite Metadata Explorer"
         ])
@@ -230,8 +290,9 @@ def create_app():
 
     # Main content area
     st.title("TCIA Data Usage Statistics")
-    st.markdown("Explore citation counts and page views for TCIA datasets.  Select from the available reports in the left sidebar.")
-    st.markdown("You can download an Endnote XML file containing all of our known citations of TCIA datasets [here](https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml).")
+    st.markdown("Explore a variety of data usage metrics for TCIA datasets.  Select from the available reports in the left sidebar.")
+
+    st.caption("Tip: Plots are interactive. Controls can be found at the top right corner of each plot.  Tables can be exported to CSV files.")
 
     # Load endnote data
     pubs_df = load_endnote_data()
@@ -243,9 +304,10 @@ def create_app():
         st.error(f"Error loading data: {str(e)}")
         return
 
-    st.caption("Tip: Plots are interactive. Controls can be found at the top right corner of each plot.  Tables can be exported to CSV files.")
     # Conditional rendering based on sidebar selection
     if page == "Dataset Citations by Year":
+        st.markdown("You can download an Endnote XML file containing all of our known citations of TCIA datasets [here](https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml).")
+
         # Count publications per year
         pubs_per_year = pubs_df['year'].value_counts().sort_index()
         # Calculate cumulative publications
@@ -284,6 +346,24 @@ def create_app():
         )
 
     elif page == "Citations and Page Views by Dataset":
+
+        # Interactive table with citation details
+        st.subheader("Page View and Citation Details")
+
+        # Create a dataframe for display
+        display_df = df[['Identifier', 'Title', 'CitationCount', 'ViewCount', 'URL', 'Rights']].copy()
+
+        # Sort by view count by default
+        display_df = display_df.sort_values('ViewCount', ascending=False)
+
+        # Display interactive dataframe
+        st.dataframe(
+            display_df,
+            hide_index=True,
+            use_container_width=True,
+            height=400
+        )
+
         # Bar chart comparing view counts for all datasets
         # Sort by view count (highest to lowest)
         sorted_by_views = df.sort_values('ViewCount', ascending=False)
@@ -322,31 +402,13 @@ def create_app():
         )
         st.plotly_chart(fig_citations, use_container_width=True)
 
-        # Interactive table with citation details
-        st.subheader("Page View and Citation Details")
-
-        # Create a dataframe for display
-        display_df = df[['Identifier', 'Title', 'CitationCount', 'ViewCount', 'URL', 'Rights']].copy()
-
-        # Sort by view count by default
-        display_df = display_df.sort_values('ViewCount', ascending=False)
-
-        # Display interactive dataframe
-        st.dataframe(
-            display_df,
-            hide_index=True,
-            use_container_width=True,
-            height=400
-        )
-
-    elif page == "Views vs Citations Scatter Plot":
         # Scatter plot comparing views vs citations
         fig = px.scatter(
             df,
             x='ViewCount',
             y='CitationCount',
             hover_data=['Identifier', 'URL', 'Title'],
-            title='Dataset Views vs Citations (Interactive)',
+            title='Dataset Views vs Citations',
             labels={'ViewCount': 'Number of Views', 'CitationCount': 'Number of Citations'}
         )
 
@@ -370,6 +432,168 @@ def create_app():
     elif page == "DataCite Metadata Explorer":
         st.subheader("DataCite DOI Metadata")
         st.dataframe(filter_dataframe(df))
+
+    elif page == "Downloads (DICOM Data)":
+        st.subheader("DICOM Downloads Over Time (GBytes)")
+
+        # Load DICOM download metrics
+        try:
+            dicom_df = load_dicom_downloads()
+        except Exception as e:
+            st.error(f"Failed to load DICOM download metrics: {e}")
+            st.stop()
+
+        # Load DICOM collection size metrics
+        try:
+            collection_size_df = load_dicom_collection_report()
+
+            # Convert 'File Size' from bytes to GBytes
+            collection_size_df['File Size'] = collection_size_df['File Size'] / (1024**3)
+
+            # Merge the DICOM data with collection sizes
+            dicom_df = pd.merge(dicom_df, collection_size_df, on='Collection', how='left')
+
+        except Exception as e:
+            st.error(f"Failed to load DICOM collection collection report data: {e}")
+            st.stop()
+
+        # Create two columns with different widths
+        col1, col2 = st.columns([2.5, 1.5])
+        with col1:
+            st.markdown("Display aggregate totals or choose an individual collection.")
+            st.markdown("Note that in 2024 Q1 there is a known gap in reporting data.")
+        with col2:
+            # Add a selection box for collection
+            collections = sorted(dicom_df["Collection"].unique().tolist())
+            collections.insert(0, "All Collections")
+            selected_collection = st.selectbox("Select a Collection", collections)
+
+        # Filter data based on selection
+        if selected_collection == "All Collections":
+            filtered_df = dicom_df
+        else:
+            filtered_df = dicom_df[dicom_df["Collection"] == selected_collection]
+
+        # Group by date and sum the downloads
+        grouped_df = filtered_df.groupby('Date').agg({'Downloads': 'sum'}).reset_index()
+
+        # ensure Date is datetime format
+        grouped_df['Date'] = pd.to_datetime(grouped_df['Date']).dt.strftime('%Y-%m-%d')
+
+        # Filter out rows where 'Downloads' is zero
+        grouped_df = grouped_df[grouped_df['Downloads'] > 0]
+
+        fig_time = px.bar(
+            grouped_df,
+            x='Date',
+            y='Downloads',
+            title=f'Selected Data - {selected_collection}',
+            labels={'Date': 'Date', 'Downloads': 'Total Number of Downloads'}
+        )
+
+        fig_time = px.bar(
+            grouped_df,
+            x='Date',
+            y='Downloads',
+            title=f'Selected Data - {selected_collection}',
+            labels={'Date': 'Date', 'Downloads': 'Downloads (GBytes)'}
+        )
+
+        fig_time.update_xaxes(
+            tickangle=45,
+            tickmode='auto',
+            nticks=20  # Adjust based on your data
+        )
+
+        fig_time.update_layout(
+            margin=dict(b=80)  # Add some bottom margin for rotated labels
+        )
+
+        st.plotly_chart(fig_time, use_container_width=True)
+
+        # Dataset-level analysis with optional date filtering
+        if 'Collection' in dicom_df.columns:
+            # Add a date range filter for the dataset-level analysis
+            st.subheader("DICOM Collection Popularity by Downloads")
+
+            # Create two columns with different widths
+            col1, col2 = st.columns([2.5, 1.5])
+            with col1:
+                st.markdown("The Normalized plot divides the total GBytes downloaded by the size of the Collection to prevent larger Collections from skewing the comparison.")
+                # Add a radio button to select plot type
+                plot_type = st.radio(
+                    "Choose plot type:",
+                    ("Normalized Downloads",
+                        "Total Downloads")
+                    )
+
+            with col2:
+                # Create slider bar
+                min_date = dicom_df['Date'].min()
+                max_date = dicom_df['Date'].max()
+
+                # Streamlit slider
+                start_date, end_date = st.slider(
+                    "Select Date Range:",
+                    min_value=min_date.to_pydatetime(),  # Convert to Python datetime
+                    max_value=max_date.to_pydatetime(),
+                    value=(min_date.to_pydatetime(), max_date.to_pydatetime()),
+                    format="YYYY-MM-DD",
+                )
+
+                # Filter the data for the selected date range
+                filtered_dataset_df = dicom_df[
+                    (dicom_df['Date'] >= pd.Timestamp(start_date)) &
+                    (dicom_df['Date'] <= pd.Timestamp(end_date))
+                ]
+
+            # plot based on radio button selection
+            if plot_type == "Total Downloads":
+                # Group data by dataset and sort
+                dataset_downloads = filtered_dataset_df.groupby('Collection', as_index=False)['Downloads'].sum().sort_values(by='Downloads', ascending=False)
+                # Create bar chart for dataset-level visualization
+                fig_dataset = px.bar(
+                    dataset_downloads,
+                    x='Collection',
+                    y='Downloads',
+                    title=f'Total Downloads by Collection (Filtered: {start_date.strftime("%Y-%m-%d")} to {end_date.strftime("%Y-%m-%d")})',
+                    labels={'Collection': 'Collection', 'Downloads': 'Total Downloads'},
+                    text='Downloads'
+                )
+                fig_dataset.update_xaxes(tickangle=45)
+                fig_dataset.update_traces(texttemplate='%{text:.2s}', textposition='outside')
+                st.plotly_chart(fig_dataset, use_container_width=True)
+            else:
+                # Calculate normalized downloads
+                filtered_dataset_df['Normalized Downloads'] = filtered_dataset_df['Downloads'] / filtered_dataset_df['File Size']
+                # Group data by dataset and sort
+                dataset_downloads = filtered_dataset_df.groupby('Collection', as_index=False)['Normalized Downloads'].sum().sort_values(by='Normalized Downloads', ascending=False)
+                # Create bar chart for dataset-level visualization
+                fig_dataset = px.bar(
+                    dataset_downloads,
+                    x='Collection',
+                    y='Normalized Downloads',
+                    title=f'Normalized Downloads by Collection (Filtered: {start_date.strftime("%Y-%m-%d")} to {end_date.strftime("%Y-%m-%d")})',
+                    labels={'Collection': 'Collection', 'Downloads': 'Normalized Downloads'},
+                    text='Normalized Downloads'
+                )
+                fig_dataset.update_xaxes(tickangle=45)
+                fig_dataset.update_traces(texttemplate='%{text:.2s}', textposition='outside')
+                st.plotly_chart(fig_dataset, use_container_width=True)
+        else:
+            st.warning("Expected column 'Collection' not found in the data.")
+
+        st.subheader("Raw Data for DICOM Downloads Over Time (GBytes)")
+        # Show data table
+        st.dataframe(dicom_df, use_container_width=True)
+
+        # Allow CSV export
+        st.download_button(
+            label="Download Data as CSV",
+            data=dicom_df.to_csv(index=False).encode('utf-8'),
+            file_name='downloads_dicom.csv',
+            mime='text/csv'
+        )
 
 if __name__ == "__main__":
     create_app()
