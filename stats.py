@@ -14,6 +14,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 import xml.etree.ElementTree as ET
+import re
 
 st.set_page_config(page_title="TCIA Data Usage Statistics", layout="wide")
 
@@ -194,13 +195,13 @@ def parse_xml(xml_file):
 
 def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Adds a UI on top of a dataframe to let viewers filter columns
+    Adds a UI on top of a dataframe to let viewers filter columns.
 
     Args:
-        df (pd.DataFrame): Original dataframe
+        df (pd.DataFrame): Original dataframe.
 
     Returns:
-        pd.DataFrame: Filtered dataframe
+        pd.DataFrame: Filtered dataframe.
     """
     modify = st.checkbox("Add filters")
 
@@ -209,7 +210,7 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
 
-    # Try to convert datetimes into a standard format (datetime, no timezone)
+    # Convert datetimes into a standard format (datetime, no timezone)
     for col in df.columns:
         if is_object_dtype(df[col]):
             try:
@@ -227,17 +228,23 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         for column in to_filter_columns:
             left, right = st.columns((1, 20))
             left.write("↳")
+            col_values = df[column]
+
+            if col_values.apply(lambda x: isinstance(x, list)).any():
+                # Handle list-like columns by converting to tuples
+                col_values = col_values.apply(lambda x: tuple(x) if isinstance(x, list) else x)
+
             # Treat columns with < 10 unique values as categorical
-            if is_categorical_dtype(df[column]) or df[column].nunique() < 10:
+            if is_categorical_dtype(col_values) or col_values.nunique() < 10:
                 user_cat_input = right.multiselect(
                     f"Values for {column}",
-                    df[column].unique(),
-                    default=list(df[column].unique()),
+                    col_values.unique(),
+                    default=list(col_values.unique()),
                 )
                 df = df[df[column].isin(user_cat_input)]
-            elif is_numeric_dtype(df[column]):
-                _min = float(df[column].min())
-                _max = float(df[column].max())
+            elif is_numeric_dtype(col_values):
+                _min = float(col_values.min())
+                _max = float(col_values.max())
                 step = (_max - _min) / 100
                 user_num_input = right.slider(
                     f"Values for {column}",
@@ -247,12 +254,12 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                     step=step,
                 )
                 df = df[df[column].between(*user_num_input)]
-            elif is_datetime64_any_dtype(df[column]):
+            elif is_datetime64_any_dtype(col_values):
                 user_date_input = right.date_input(
                     f"Values for {column}",
                     value=(
-                        df[column].min(),
-                        df[column].max(),
+                        col_values.min(),
+                        col_values.max(),
                     ),
                 )
                 if len(user_date_input) == 2:
@@ -264,7 +271,7 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                     f"Substring or regex in {column}",
                 )
                 if user_text_input:
-                    df = df[df[column].str.contains(user_text_input)]
+                    df = df[col_values.astype(str).str.contains(user_text_input, flags=re.IGNORECASE, na=False)]
 
     return df
 
@@ -279,6 +286,7 @@ def create_app():
             "Dataset Citations by Year",
             "Citations and Page Views by Dataset",
             "Downloads (DICOM Data)",
+            "Downloads (Non-DICOM Data)",
             "Endnote Citation Explorer",
             "DataCite Metadata Explorer"
         ])
@@ -427,11 +435,205 @@ def create_app():
 
     elif page == "Endnote Citation Explorer":
         st.subheader("Endnote Citations")
+        st.markdown("You can download an Endnote XML file containing all of our known citations of TCIA datasets [here](https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml).")
+        st.markdown("This view provides an interactive filtering mechanism to search its contents and export subsets to CSV.")
         st.dataframe(filter_dataframe(pubs_df))
 
     elif page == "DataCite Metadata Explorer":
         st.subheader("DataCite DOI Metadata")
         st.dataframe(filter_dataframe(df))
+
+    elif page == "Downloads (Non-DICOM Data)":
+
+        @st.cache_data
+        def load_and_process_aspera_data(file):
+            # Read CSV, skip first row since it's junk
+            df = pd.read_excel(file, skiprows=1)
+
+            # Rename unnamed first column to 'metric'
+            df = df.rename(columns={df.columns[0]: 'metric'})
+
+            # Melt the dataframe to convert date columns to rows
+            melted_df = pd.melt(
+                df,
+                id_vars=['metric', 'Collection'],
+                var_name='date',
+                value_name='value'
+            )
+
+            # Convert date strings to datetime objects
+            melted_df['date'] = pd.to_datetime(melted_df['date'])
+
+            # Create separate dataframes for each metric
+            complete_downloads = melted_df[melted_df['metric'] == 'Complete Downloads (Count)'].copy()
+            complete_downloads_gb = melted_df[melted_df['metric'] == 'Complete Downloads (GB)'].copy()
+            partial_downloads = melted_df[melted_df['metric'] == 'Partial Downloads (Count)'].copy()
+
+            return complete_downloads, complete_downloads_gb, partial_downloads
+
+        def create_cumulative_visualization(df, title, y_axis_title):
+            # Group by date and sum values across all collections
+            daily_totals = df.groupby('date')['value'].sum().reset_index()
+            # Calculate cumulative sum
+            daily_totals['cumulative_value'] = daily_totals['value'].cumsum()
+
+            # Create figure with secondary y-axis
+            fig = px.bar(
+                daily_totals,
+                x='date',
+                y='value',
+                title=title,
+                labels={
+                    'date': 'Date',
+                    'value': y_axis_title,
+                    'cumulative_value': f'Cumulative {y_axis_title}'
+                }
+            )
+
+            # Add line trace for cumulative values
+            line_trace = px.line(
+                daily_totals,
+                x='date',
+                y='cumulative_value'
+            ).data[0]
+
+            # Update line trace to use secondary y-axis
+            line_trace.yaxis = 'y2'
+            fig.add_trace(line_trace)
+
+            # Update layout for dual y-axes
+            fig.update_layout(
+                hovermode='x unified',
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                ),
+                yaxis=dict(
+                    title=y_axis_title,
+                    side='left'
+                ),
+                yaxis2=dict(
+                    title=f'Cumulative {y_axis_title}',
+                    side='right',
+                    overlaying='y'
+                )
+            )
+
+            # Update names for legend
+            fig.data[0].name = 'Daily Total'
+            fig.data[1].name = 'Cumulative Total'
+
+            return fig
+
+        def create_single_collection_visualization(df, collection_name, title, y_axis_title):
+            # Filter for selected collection
+            collection_df = df[df['Collection'] == collection_name].copy()
+            # Calculate cumulative sum for this collection
+            collection_df['cumulative_value'] = collection_df['value'].cumsum()
+
+            # Create figure with secondary y-axis
+            fig = px.bar(
+                collection_df,
+                x='date',
+                y='value',
+                title=f"{title} - {collection_name}",
+                labels={
+                    'date': 'Date',
+                    'value': y_axis_title,
+                    'cumulative_value': f'Cumulative {y_axis_title}'
+                }
+            )
+
+            # Add line trace for cumulative values
+            line_trace = px.line(
+                collection_df,
+                x='date',
+                y='cumulative_value'
+            ).data[0]
+
+            # Update line trace to use secondary y-axis
+            line_trace.yaxis = 'y2'
+            fig.add_trace(line_trace)
+
+            # Update layout for dual y-axes
+            fig.update_layout(
+                hovermode='x unified',
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                ),
+                yaxis=dict(
+                    title=y_axis_title,
+                    side='left'
+                ),
+                yaxis2=dict(
+                    title=f'Cumulative {y_axis_title}',
+                    side='right',
+                    overlaying='y'
+                )
+            )
+
+            # Update names for legend
+            fig.data[0].name = 'Daily Total'
+            fig.data[1].name = 'Cumulative Total'
+
+            return fig
+
+        # load and process aspera data
+        uploaded_file = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_aspera.xlsx"
+        complete_downloads, complete_downloads_gb, partial_downloads = load_and_process_aspera_data(uploaded_file)
+
+        if complete_downloads is not None:
+            # Create two columns with different widths
+            col1, col2 = st.columns([2.5, 1.5])
+            with col1:
+                # Create visualization selector
+                viz_type = st.radio(
+                    "Select visualization type:",
+                    # exclude complete download GB chart for now since we don't have partial equivalent
+                    #["Complete Downloads", "Download Volume (GB)", "Partial Downloads"]
+                    ["Complete Downloads", "Partial Downloads"]
+                )
+
+                # Get the appropriate dataframe based on selection
+                if viz_type == "Complete Downloads":
+                    df_to_use = complete_downloads
+                    y_axis_title = "Number of Downloads"
+                elif viz_type == "Download Volume (GB)":
+                    df_to_use = complete_downloads_gb
+                    y_axis_title = "Download Size (GB)"
+                else:
+                    df_to_use = partial_downloads
+                    y_axis_title = "Number of Partial Downloads"
+            with col2:
+                # Add a selection box for collection
+                collections = sorted(df_to_use["Collection"].unique().tolist())
+                collections.insert(0, "All Collections")
+                selected_collection = st.selectbox("Select a Collection", collections)
+
+            if selected_collection == "All Collections":
+                fig = create_cumulative_visualization(
+                    df_to_use,
+                    f"{viz_type} - All Collections",
+                    y_axis_title
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                fig = create_single_collection_visualization(
+                    df_to_use,
+                    selected_collection,
+                    f"{viz_type}",
+                    y_axis_title
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
     elif page == "Downloads (DICOM Data)":
         st.subheader("DICOM Downloads Over Time (GBytes)")
@@ -446,6 +648,9 @@ def create_app():
         # Load DICOM collection size metrics
         try:
             collection_size_df = load_dicom_collection_report()
+
+            # Drop all columns except "Collection" and "File Size"
+            collection_size_df = collection_size_df[['Collection', 'File Size']]
 
             # Convert 'File Size' from bytes to GBytes
             collection_size_df['File Size'] = collection_size_df['File Size'] / (1024**3)
@@ -584,6 +789,10 @@ def create_app():
             st.warning("Expected column 'Collection' not found in the data.")
 
         st.subheader("Raw Data for DICOM Downloads Over Time (GBytes)")
+
+        # Drop the "File Size" column from dicom_df (was only necessary for normalized calculation)
+        dicom_df = dicom_df.drop(columns=["File Size"])
+
         # Show data table
         st.dataframe(dicom_df, use_container_width=True)
 
