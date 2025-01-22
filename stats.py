@@ -15,6 +15,9 @@ import plotly.graph_objects as go
 import numpy as np
 import xml.etree.ElementTree as ET
 import re
+from collections import Counter
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="TCIA Data Usage Statistics", layout="wide")
 
@@ -437,7 +440,63 @@ def create_app():
         st.subheader("Endnote Citations")
         st.markdown("You can download an Endnote XML file containing all of our known citations of TCIA datasets [here](https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml).")
         st.markdown("This view provides an interactive filtering mechanism to search its contents and export subsets to CSV.")
-        st.dataframe(filter_dataframe(pubs_df))
+
+        filtered_endnote_explorer = filter_dataframe(pubs_df)
+        st.dataframe(filtered_endnote_explorer)
+
+        # count keywords for barchart and word cloud
+        all_keywords = [keyword for sublist in filtered_endnote_explorer['keywords'] for keyword in sublist]
+        keyword_counts = Counter(all_keywords)
+
+        # Word Cloud for Keywords
+        st.subheader('Keyword Word Cloud')
+        wordcloud = WordCloud(width=1600, height=800, background_color='white').generate_from_frequencies(keyword_counts)
+
+        # Create a Matplotlib figure with higher DPI
+        plt.figure(figsize=(20, 10), dpi=300)  # Increase figure size and DPI
+        plt.imshow(wordcloud, interpolation='bilinear')
+        plt.axis('off')
+
+        # Display the word cloud in Streamlit
+        st.pyplot(plt, dpi=300)  # Set DPI for Streamlit display
+
+        # settings for dropdown menus that control how many authors/keywords in bar charts
+        top_n_options = [10, 25, 50, 100]
+
+        # Top N Keywords
+        st.subheader(f'Top Keywords')
+        top_n_keywords = st.selectbox('Select top N keywords', options=top_n_options)
+        top_keywords = pd.DataFrame(keyword_counts.most_common(top_n_keywords), columns=['Keyword', 'Count'])
+        fig_keywords = px.bar(top_keywords, x='Keyword', y='Count', title=f'Top {top_n_keywords} Keywords')
+        fig_keywords.update_xaxes(tickangle=45)
+        st.plotly_chart(fig_keywords)
+
+        # Top N Authors
+        st.subheader(f'Top Authors')
+        top_n_authors = st.selectbox('Select top N authors', options=top_n_options)
+
+        all_authors = [author for sublist in filtered_endnote_explorer['authors'] for author in sublist]
+        author_counts = Counter(all_authors)
+        top_authors = pd.DataFrame(author_counts.most_common(top_n_authors), columns=['Author', 'Count'])
+        fig_authors = px.bar(top_authors, x='Author', y='Count', title=f'Top {top_n_authors} Authors')
+        fig_authors.update_xaxes(tickangle=45)
+        st.plotly_chart(fig_authors)
+
+        # Reference Type Distribution
+        st.subheader('Reference Type Distribution')
+        ref_type_counts = filtered_endnote_explorer['ref-type-name'].value_counts().reset_index()
+        ref_type_counts.columns = ['Reference Type', 'Count']
+        fig_ref_type = px.bar(ref_type_counts, x='Reference Type', y='Count', title='Reference Type Distribution')
+        fig_ref_type.update_xaxes(tickangle=45)
+        st.plotly_chart(fig_ref_type)
+
+        # Year Distribution
+        st.subheader('Year Distribution')
+        year_counts = filtered_endnote_explorer['year'].value_counts().reset_index()
+        year_counts.columns = ['Year', 'Count']
+        fig_year = px.bar(year_counts, x='Year', y='Count', title='Year Distribution')
+        fig_year.update_xaxes(tickangle=45)
+        st.plotly_chart(fig_year)
 
     elif page == "DataCite Metadata Explorer":
         st.subheader("DataCite DOI Metadata")
