@@ -26,7 +26,7 @@ st.markdown(
     """
     <style>
     .stApp {
-        margin-top: -75px;  /* Adjust this value as needed */
+        margin-top: -50px;  /* Adjust this value as needed */
     }
 
     </style>
@@ -295,11 +295,8 @@ def create_app():
     # Sidebar for navigation and logo
     with st.sidebar:
         # align vertical with main content using empty placeholders
-        st.title("")
         st.markdown("")
-        st.markdown("")
-        st.markdown("")
-        st.markdown("")
+        st.title("Publications Based on TCIA")
         # Navigation selection
         page = st.radio("Select a TCIA publication report", [
             "Verified TCIA Data Usage Citations",
@@ -315,8 +312,8 @@ def create_app():
             st.cache_data.clear()  # Clear cache for all functions
 
     # Main content area
-    st.title("Publications Based on TCIA")
-    st.markdown("Use the menu in the left sidebar to select a data source.")
+    #st.title("Publications Based on TCIA")
+    #st.markdown("Use the menu in the left sidebar to select a data source.")
 
     # Load endnote data
     pubs_df = load_endnote_data()
