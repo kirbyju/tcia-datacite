@@ -294,6 +294,13 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 def create_app():
     # Sidebar for navigation and logo
     with st.sidebar:
+        # align vertical with main content using empty placeholders
+        st.title("")
+        st.markdown("")
+        st.markdown("")
+        st.markdown("")
+        st.markdown("")
+        st.markdown("")
         # Navigation selection
         page = st.radio("Select a TCIA publication report", [
             "Verified TCIA Data Usage Citations",
