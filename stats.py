@@ -300,7 +300,6 @@ def create_app():
         st.markdown("")
         st.markdown("")
         st.markdown("")
-        st.markdown("")
         # Navigation selection
         page = st.radio("Select a TCIA publication report", [
             "Verified TCIA Data Usage Citations",
@@ -335,7 +334,6 @@ def create_app():
 
         st.markdown("We perform regular literature reviews in order to distinguish papers which explicitly analyzed TCIA datasets from those that simply mention TCIA or its data in some capacity.  You can download an Endnote XML file containing these verified citations [here](https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml).  This file should be usable as input to your favorite reference management system.")
         st.markdown("If you've analyzed TCIA data and don’t see your publication on this list please [notify us](https://www.cancerimagingarchive.net/support/)!")
-        st.markdown("Publications written by the TCIA team are tracked separately and can be [found here](https://wiki.cancerimagingarchive.net/x/rgclAw).")
 
         # Count publications per year
         pubs_per_year = pubs_df['year'].value_counts().sort_index()
