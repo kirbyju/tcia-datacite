@@ -295,7 +295,6 @@ def create_app():
     # Sidebar for navigation and logo
     with st.sidebar:
         # align vertical with main content using empty placeholders
-        st.markdown("")
         st.title("Publications Based on TCIA")
         # Navigation selection
         page = st.radio("Select a TCIA publication report", [
@@ -310,10 +309,6 @@ def create_app():
         st.markdown("Source data refreshes daily, but can be manually updated using this button.")
         if st.button("Refresh All Data"):
             st.cache_data.clear()  # Clear cache for all functions
-
-    # Main content area
-    #st.title("Publications Based on TCIA")
-    #st.markdown("Use the menu in the left sidebar to select a data source.")
 
     # Load endnote data
     pubs_df = load_endnote_data()
@@ -367,7 +362,7 @@ def create_app():
             hide_index=False
         )
 
-        st.subheader("")
+        st.subheader("Explore Publications")
         st.markdown("Apply filters to our verified data usage citations and export subsets to CSV.")
 
         filtered_endnote_explorer = filter_dataframe(pubs_df)
@@ -420,25 +415,29 @@ def create_app():
         st.pyplot(plt, dpi=300)  # Set DPI for Streamlit display
 
     elif page == "DataCite Citations and Page Views":
-        st.markdown("[DataCite](https://commons.datacite.org/repositories/nihnci.tcia) attempts to document all relationships between Digital Object Identifiers.")
-        st.markdown("These reports include information contributed by other entities such as journals and other data repositories, as well as relationship data submitted by TCIA.")
+        st.title("DataCite Citations and Page Views")
+        st.markdown("[DataCite](https://commons.datacite.org/repositories/nihnci.tcia) attempts to document all relationships between Digital Object Identifiers. These reports include information contributed by other entities such as journals and other data repositories, as well as relationship data submitted by TCIA.")
 
         # Interactive table with citation details
-        st.subheader("Page View and Citation Details")
+        st.subheader("Explore Page Views and Citation Counts")
 
-        # Create a dataframe for display
-        display_df = df[['Identifier', 'Title', 'CitationCount', 'ViewCount', 'URL', 'Rights']].copy()
+        # Define the desired column order
+        column_order = [
+            "DOI", "Identifier", "ViewCount", "CitationCount", "ReferenceCount", "URL", "Title",
+            "Related", "Created", "Updated", "Version", "Rights", "RightsURI", "CreatorNames",
+            "Description", "FundingReferences"
+        ]
 
-        # Sort by view count by default
-        display_df = display_df.sort_values('ViewCount', ascending=False)
+        # Reorder the columns
+        df = df[column_order]
 
-        # Display interactive dataframe
-        st.dataframe(
-            display_df,
-            hide_index=True,
-            use_container_width=True,
-            height=400
-        )
+        # Sort by ViewCount in descending order
+        df = df.sort_values(by="ViewCount", ascending=False)
+
+        # Reset the index (and drop the old index)
+        df = df.reset_index(drop=True)
+
+        st.dataframe(filter_dataframe(df))
 
         # Bar chart comparing view counts for all datasets
         # Sort by view count (highest to lowest)
@@ -497,13 +496,9 @@ def create_app():
                 line=dict(color='red', dash='dash')
             )
         )
-
         fig.update_layout(height=600)
         st.plotly_chart(fig, use_container_width=True)
 
-        # Detailed metadata filtering
-        st.subheader("DataCite DOI Metadata")
-        st.dataframe(filter_dataframe(df))
 
     elif page == "TCIA Staff Publications":
         st.subheader("TCIA Staff Publications")
