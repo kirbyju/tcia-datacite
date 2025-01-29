@@ -18,6 +18,7 @@ import re
 from collections import Counter
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
+import random
 
 st.set_page_config(page_title="Publications - The Cancer Imaging Archive (TCIA)", layout="wide")
 
@@ -28,7 +29,6 @@ st.markdown(
     .stApp {
         margin-top: -50px;  /* Adjust this value as needed */
     }
-
     </style>
     """,
     unsafe_allow_html=True,
@@ -79,66 +79,6 @@ def load_data():
     """Load TCIA dataset information using datacite"""
     df = datacite.getDoi()
     return df
-
-# Function to fetch DICOM data
-@st.cache_data
-def load_dicom_downloads():
-    #url = "https://cancerimagingarchive.net/downloads_dicom.csv"
-    url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_dicom.csv"
-    df = pd.read_csv(url)
-
-    # Remove any unnamed columns that might be causing issues
-    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
-
-    # Reshape the data
-    df_long = pd.melt(
-        df,
-        id_vars=["Collection"],  # Keep 'Collection' as-is
-        var_name="Date",         # Create a 'Date' column from column headers
-        value_name="Bytes (GB)"  # Create a 'Bytes (GB)' column from values
-    )
-
-    # rename column
-    df_long.rename(columns={"Bytes (GB)": "Downloads"}, inplace=True)
-
-    # Convert 'Date' column to datetime -- YYYY-MM-DD
-    df_long["Date"] = pd.to_datetime(df_long["Date"], errors="coerce")
-
-    # Ensure required columns exist
-    if 'Date' not in df_long.columns or 'Downloads' not in df_long.columns:
-        st.error("Expected columns 'Date' and 'Downloads' not found in the data.")
-        st.stop()
-
-    # Drop rows with invalid or missing dates (if any)
-    df_long = df_long.dropna(subset=["Date"])
-
-    # Handle missing or invalid data in 'Downloads'
-    df_long['Downloads'].fillna(0, inplace=True)  # Replace NaN with 0 for summation
-
-    # Function to clean and convert the Downloads column
-    def clean_downloads(value):
-        try:
-            # Remove commas and convert to float
-            return float(value.replace(',', ''))
-        except AttributeError:
-            # If there are no commas, directly convert to float
-            return float(value)
-
-    # Apply the cleaning function to the Downloads
-    df_long["Downloads"] = df_long["Downloads"].apply(clean_downloads)
-
-    # Drop rows where 'Downloads' is 0
-    df_long = df_long[df_long["Downloads"] != 0]
-
-    return df_long
-
-# function to fetch DICOM collection stats
-@st.cache_data
-def load_dicom_collection_report():
-    # ingest summary CSV output of nbia.reportCollectionSummary(series, format = "csv")
-    url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/tcia_collection_report.csv"
-    df_sizes = pd.read_csv(url)
-    return df_sizes
 
 # Refresh cache based on TTL
 if should_refresh_cache(ttl=86400):  # Set TTL to 1 day
@@ -292,6 +232,7 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def create_app():
+
     # Sidebar for navigation and logo
     with st.sidebar:
         # align vertical with main content using empty placeholders
@@ -305,10 +246,13 @@ def create_app():
 
         st.caption("Tip: Plots are interactive. Hover over plots to activate controls that will appear in the top right corner of each plot.  Tables can be exported to CSV files.")
 
-        # Add manual refresh button
-        st.markdown("Source data refreshes daily, but can be manually updated using this button.")
-        if st.button("Refresh All Data"):
-            st.cache_data.clear()  # Clear cache for all functions
+    # Check if the button was clicked (via query parameter)
+    if st.query_params.get("clear_cache") == "true":
+        # Clear the cache
+        st.cache_data.clear()
+        st.success("Cache cleared successfully!")
+        # Remove the query parameter to avoid repeated clearing
+        st.query_params.clear()
 
     # Load endnote data
     pubs_df = load_endnote_data()
@@ -325,7 +269,7 @@ def create_app():
         st.subheader("Verified TCIA Data Usage Citations")
 
         st.markdown("We perform regular literature reviews in order to distinguish papers which explicitly analyzed TCIA datasets from those that simply mention TCIA or its data in some capacity.  You can download an Endnote XML file containing these verified citations [here](https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml).  This file should be usable as input to your favorite reference management system.")
-        st.markdown("If you've analyzed TCIA data and don’t see your publication on this list please [notify us](https://www.cancerimagingarchive.net/support/)!")
+        st.markdown("Publication years represent the year the paper was published, not the year we added it to our reference library.  There is generally a significant lag time between when papers are published and when we find time to add them to our library due to the amount of effort required to assess each paper and verify our data was actually used.  If you've analyzed TCIA data and don’t see your publication on this list please [notify us](https://www.cancerimagingarchive.net/support/)!")
 
         # Count publications per year
         pubs_per_year = pubs_df['year'].value_counts().sort_index()
@@ -363,7 +307,7 @@ def create_app():
         )
 
         st.subheader("Explore Publications")
-        st.markdown("Apply filters to our verified data usage citations and export subsets to CSV.")
+        st.markdown("Apply filters to our verified data usage citations and export subsets to CSV.  To export a CSV, mouse over the table and then use the download button in the top right corner.")
 
         filtered_endnote_explorer = filter_dataframe(pubs_df)
         st.dataframe(filtered_endnote_explorer)
@@ -372,8 +316,10 @@ def create_app():
         top_n_options = [10, 25, 50, 100]
 
         # Top N Authors
-        st.subheader(f'Top Authors')
-        top_n_authors = st.selectbox('Select top N authors', options=top_n_options)
+        st.subheader(f'Top Authors by TCIA Publication Counts')
+        col1, col2 = st.columns([1, 10])
+        with col1:
+            top_n_authors = st.selectbox('Select top N authors', options=top_n_options, index=2)
 
         all_authors = [author for sublist in filtered_endnote_explorer['authors'] for author in sublist]
         author_counts = Counter(all_authors)
@@ -396,15 +342,24 @@ def create_app():
 
         # Top N Keywords
         st.subheader(f'Top Keywords')
-        top_n_keywords = st.selectbox('Select top N keywords', options=top_n_options)
+        col1, col2 = st.columns([2, 10])
+        with col1:
+            top_n_keywords = st.selectbox('Select top N keywords', options=top_n_options, index=2)
         top_keywords = pd.DataFrame(keyword_counts.most_common(top_n_keywords), columns=['Keyword', 'Count'])
         fig_keywords = px.bar(top_keywords, x='Keyword', y='Count', title=f'Top {top_n_keywords} Keywords')
         fig_keywords.update_xaxes(tickangle=45)
         st.plotly_chart(fig_keywords)
 
+        # Define the color palette
+        colors = ['#5BC6FF', '#51A6FA', '#2467A8', '#042B5B']
+
+        # Create a custom color function
+        def color_func(word, font_size, position, orientation, random_state=None, **kwargs):
+            return random.choice(colors)
+
         # Word Cloud for Keywords
         st.subheader('Keyword Cloud')
-        wordcloud = WordCloud(width=1600, height=800, background_color='white').generate_from_frequencies(keyword_counts)
+        wordcloud = WordCloud(width=1600, height=800, color_func=color_func, background_color='#E9E9E9').generate_from_frequencies(keyword_counts)
 
         # Create a Matplotlib figure with higher DPI
         plt.figure(figsize=(20, 10), dpi=300)  # Increase figure size and DPI
@@ -416,7 +371,7 @@ def create_app():
 
     elif page == "DataCite Citations and Page Views":
         st.title("DataCite Citations and Page Views")
-        st.markdown("[DataCite](https://commons.datacite.org/repositories/nihnci.tcia) attempts to document all relationships between Digital Object Identifiers. These reports include information contributed by other entities such as journals and other data repositories, as well as relationship data submitted by TCIA.")
+        st.markdown("[DataCite](https://commons.datacite.org/repositories/nihnci.tcia) attempts to document all relationships between Digital Object Identifiers.  They also track metrics such as citation counts and page views as part of the [Make Data Count](https://makedatacount.org/) initiative. Statistics they've aggregated are summarized below, which includes information contributed by entities such as journals and other data repositories in addition to what TCIA submits.")
 
         # Interactive table with citation details
         st.subheader("Explore Page Views and Citation Counts")
@@ -524,11 +479,17 @@ def create_app():
         page_data = fetch_public_confluence_page(PAGE_ID)
         if page_data:
             page_url = f"{CONFLUENCE_URL}/pages/viewpage.action?pageId={PAGE_ID}"
-            st.markdown(f"[View on Confluence]({page_url})", unsafe_allow_html=True)
             st.markdown(page_data["body"]["view"]["value"], unsafe_allow_html=True)
         else:
             st.warning("Unable to fetch the page content. Please check the page ID.")
 
+        col1, col2 = st.columns([10, 2])
+        with col1:
+            st.markdown(f"[View on Confluence]({page_url})", unsafe_allow_html=True)
+        with col2:
+            if st.button("🗑️ Clear Cache", help="Click to clear cached data"):
+                st.cache_data.clear()
+                st.success("Cache cleared successfully!")
 
 
 if __name__ == "__main__":
