@@ -336,38 +336,41 @@ def create_app():
         fig_ref_type.update_xaxes(tickangle=45)
         st.plotly_chart(fig_ref_type)
 
+        ### Possibly reintroduce keyword features later if source data are cleaned up
+        #
         # count keywords for barchart and word cloud
-        all_keywords = [keyword for sublist in filtered_endnote_explorer['keywords'] for keyword in sublist]
-        keyword_counts = Counter(all_keywords)
+        #all_keywords = [keyword for sublist in filtered_endnote_explorer['keywords'] for keyword in sublist]
+        #keyword_counts = Counter(all_keywords)
 
         # Top N Keywords
-        st.subheader(f'Top Keywords')
-        col1, col2 = st.columns([2, 10])
-        with col1:
-            top_n_keywords = st.selectbox('Select top N keywords', options=top_n_options, index=2)
-        top_keywords = pd.DataFrame(keyword_counts.most_common(top_n_keywords), columns=['Keyword', 'Count'])
-        fig_keywords = px.bar(top_keywords, x='Keyword', y='Count', title=f'Top {top_n_keywords} Keywords')
-        fig_keywords.update_xaxes(tickangle=45)
-        st.plotly_chart(fig_keywords)
+        #st.subheader(f'Top Keywords')
+        #col1, col2 = st.columns([2, 10])
+        #with col1:
+        #    top_n_keywords = st.selectbox('Select top N keywords', options=top_n_options, index=2)
+        #top_keywords = pd.DataFrame(keyword_counts.most_common(top_n_keywords), columns=['Keyword', 'Count'])
+        #fig_keywords = px.bar(top_keywords, x='Keyword', y='Count', title=f'Top {top_n_keywords} Keywords')
+        #fig_keywords.update_xaxes(tickangle=45)
+        #st.plotly_chart(fig_keywords)
 
         # Define the color palette
-        colors = ['#5BC6FF', '#51A6FA', '#2467A8', '#042B5B']
+        #colors = ['#5BC6FF', '#51A6FA', '#2467A8', '#042B5B']
 
         # Create a custom color function
-        def color_func(word, font_size, position, orientation, random_state=None, **kwargs):
-            return random.choice(colors)
+        #def color_func(word, font_size, position, orientation, random_state=None, **kwargs):
+        #    return random.choice(colors)
 
         # Word Cloud for Keywords
-        st.subheader('Keyword Cloud')
-        wordcloud = WordCloud(width=1600, height=800, color_func=color_func, background_color='#E9E9E9').generate_from_frequencies(keyword_counts)
+        #st.subheader('Keyword Cloud')
+        #wordcloud = WordCloud(width=1600, height=800, color_func=color_func, background_color='#E9E9E9').generate_from_frequencies(keyword_counts)
 
         # Create a Matplotlib figure with higher DPI
-        plt.figure(figsize=(20, 10), dpi=300)  # Increase figure size and DPI
-        plt.imshow(wordcloud, interpolation='bilinear')
-        plt.axis('off')
+        #plt.figure(figsize=(20, 10), dpi=300)  # Increase figure size and DPI
+        #plt.imshow(wordcloud, interpolation='bilinear')
+        #plt.axis('off')
 
         # Display the word cloud in Streamlit
-        st.pyplot(plt, dpi=300)  # Set DPI for Streamlit display
+        #st.pyplot(plt, dpi=300)  # Set DPI for Streamlit display
+
 
     elif page == "DataCite Citations and Page Views":
         st.title("DataCite Citations and Page Views")
