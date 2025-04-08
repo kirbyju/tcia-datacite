@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from tcia_utils import datacite
-from tcia_utils import wordpress
 
 from pandas.api.types import (
     is_object_dtype,
@@ -80,42 +79,50 @@ def load_datacite_data():
     df = datacite.getDoi()
     return df
 
-# Wordpress Data Loader ---- may not need?
+# function to fetch DICOM searches
 @st.cache_data
-def load_wordpress_data():
-    """Load TCIA dataset information from Wordpress"""
+def load_dicom_searches():
+    df = pd.read_excel('https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/search_dicom_2025-04-04.xlsx')
 
-    # select fields to retrieve
-    fields = ["id", "slug", "collection_page_accessibility", "link", "cancer_types",
-              "collection_doi", "cancer_locations", "collection_status", "species",
-              "versions", "citations", "collection_title", "version_number",
-              "date_updated", "subjects", "collection_short_title", "data_types",
-              "supporting_data", "program", "collection_summary", "collection_downloads"]
+    # Transpose the DataFrame
+    transposed_df = df.transpose()  # or simply df.T
 
-    # request metadata
-    collections = wordpress.getCollections(format = "df", fields = fields, file_name = "tciaCollections.csv", removeHtml = "yes")
+    # Reset index if needed (optional)
+    transposed_df.reset_index(inplace=True)
 
-    # select fields to retrieve
-    fields = ["id", "slug", "result_page_accessibility", "type",
-              "link", "cancer_types", "result_doi", "cancer_locations",
-              "status", "citations", "result_title", "version_number",
-              "date_updated", "versions", "subjects", "result_short_title",
-              "supporting_data", "program", "result_summary", "result_downloads"]
+    # Optionally, drop the 'index' column if it's no longer needed
+    transposed_df = transposed_df.drop(columns=['index'])
 
-    # request metadata
-    analyses = wordpress.getAnalyses(format = "df", fields = fields, file_name = "tciaAnalyses.csv")
+    # Set the first row as the new column headers
+    transposed_df.columns = transposed_df.iloc[0]  # Set the first row as the column headers
+    transposed_df = transposed_df[1:]  # Drop the first row (since it's now the header row)
 
-    # merge and retain doi...and that's it?
+    # Convert all values in 'Search Criteria' to strings
+    transposed_df['Search Criteria'] = transposed_df['Search Criteria'].astype(str)
 
+    # Filter out rows based on updated conditions
+    filtered_df = transposed_df[
+        ~transposed_df['Search Criteria'].str.match('nan') &  # Remove rows where the value is NaN
+        ~transposed_df['Search Criteria'].str.match(r'^[A-Za-z]$', na=False) &  # Remove single letters
+        ~transposed_df['Search Criteria'].str.match(r'^\d(\.0)?$', na=False) &  # Remove single-digit integers or floats (e.g., 1 or 1.0)
+        ~transposed_df['Search Criteria'].str.match(r'^[_-]$', na=False)  # Remove single underscores or dashes
+    ]
 
-    return df
+    melted_df = filtered_df.melt(
+        id_vars=["Search Criteria"],
+        value_vars=["AnatomicalSite", "Collection", "Modality"],
+        var_name="Category",
+        value_name="Clicks"
+    ).dropna()
 
-# Function to fetch DICOM data
+    return melted_df
+
+# Function to fetch DICOM downloads
 @st.cache_data
 def load_dicom_downloads():
     #url = "https://cancerimagingarchive.net/downloads_dicom.csv"
-    url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_dicom.csv"
-    df = pd.read_csv(url)
+    url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_dicom_2025-04-04.xlsx"
+    df = pd.read_excel(url)
 
     # Remove any unnamed columns that might be causing issues
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
@@ -143,7 +150,7 @@ def load_dicom_downloads():
     df_long = df_long.dropna(subset=["Date"])
 
     # Handle missing or invalid data in 'Downloads'
-    df_long['Downloads'].fillna(0, inplace=True)  # Replace NaN with 0 for summation
+    df_long['Downloads'] = df_long['Downloads'].fillna(0)
 
     # Function to clean and convert the Downloads column
     def clean_downloads(value):
@@ -162,8 +169,7 @@ def load_dicom_downloads():
 
     return df_long
 
-# function to fetch DICOM collection stats
-# may be able to just get this from wordpress rather than aggregating from nbia?
+# function to fetch DICOM collection stats to calculate sizes
 @st.cache_data
 def load_dicom_collection_report():
     # ingest summary CSV output of nbia.reportCollectionSummary(series, format = "csv")
@@ -479,6 +485,13 @@ def create_app():
     # load and process aspera downloads
     complete_downloads, complete_downloads_gb, partial_downloads = load_and_process_aspera_data()
 
+    # Load DICOM search metrics
+    try:
+        dicom_search_df = load_dicom_searches()
+    except Exception as e:
+        st.error(f"Failed to load DICOM search metrics: {e}")
+        st.stop()
+
     # Load DICOM download metrics
     try:
         dicom_df = load_dicom_downloads()
@@ -558,102 +571,115 @@ def create_app():
     # Filter the DataFrame
     pubs_df = filter_by_keyword(pubs_df, dataset)
 
-    # Count publications per year
-    pubs_per_year = pubs_df['year'].value_counts().sort_index()
-    # Calculate cumulative publications
-    cumulative_pubs = pubs_per_year.cumsum()
+    if pubs_df.empty:
+        st.warning("There are no Verified Citations that we're aware of using this dataset. Please contact us if there are any you'd like to add!")
+    else:
+        # Count publications per year
+        pubs_per_year = pubs_df['year'].value_counts().sort_index()
+        # Calculate cumulative publications
+        cumulative_pubs = pubs_per_year.cumsum()
 
-    # Create a dataframe with yearly totals in columns
-    df_totals = pd.DataFrame({
-        'Publications per Year': pubs_per_year,
-        'Cumulative Publications': cumulative_pubs
-    }).T  # Transpose to make years column headers
+        # Create a dataframe with yearly totals in columns
+        df_totals = pd.DataFrame({
+            'Publications per Year': pubs_per_year,
+            'Cumulative Publications': cumulative_pubs
+        }).T  # Transpose to make years column headers
 
-    # Rename the index to make it more descriptive
-    df_totals.index.name = 'Metric'
+        # Rename the index to make it more descriptive
+        df_totals.index.name = 'Metric'
 
-    # Function to determine appropriate tick intervals
-    def determine_tick_interval(values):
-        values = [int(value) for value in values if value is not None and value != '']
-        if len(values) < 2:
-            return 1
-        range_values = max(values) - min(values)
-        return max(1, range_values // 5)
+        # Function to determine appropriate tick intervals
+        def determine_tick_interval(values):
+            values = [int(value) for value in values if value is not None and value != '']
+            if len(values) < 2:
+                return 1
+            range_values = max(values) - min(values)
+            return max(1, range_values // 5)
 
-    # Create the chart
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=pubs_per_year.index, y=pubs_per_year.values, name='Yearly Citations'))
-    fig.add_trace(go.Scatter(x=cumulative_pubs.index, y=cumulative_pubs.values, mode='lines+markers', name='Cumulative Citations', yaxis='y2'))
+        # Create the chart
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=pubs_per_year.index, y=pubs_per_year.values, name='Yearly Citations'))
+        fig.add_trace(go.Scatter(x=cumulative_pubs.index, y=cumulative_pubs.values, mode='lines+markers', name='Cumulative Citations', yaxis='y2'))
 
-    # Determine tick intervals for years and citations
-    x_tick_interval = determine_tick_interval(pubs_per_year.index)
-    y_tick_interval = determine_tick_interval(pubs_per_year.values)
-    y2_tick_interval = determine_tick_interval(cumulative_pubs.values)
+        # Determine tick intervals for years and citations
+        x_tick_interval = determine_tick_interval(pubs_per_year.index)
+        y_tick_interval = determine_tick_interval(pubs_per_year.values)
+        y2_tick_interval = determine_tick_interval(cumulative_pubs.values)
 
-    # Update layout to show appropriate ticks
-    fig.update_layout(
-        xaxis=dict(
-            title='Year',
-            tickmode='linear',
-            dtick=x_tick_interval
-        ),
-        yaxis=dict(
-            title='Yearly Citations',
-            tickmode='linear',
-            dtick=y_tick_interval
-        ),
-        yaxis2=dict(
-            title='Cumulative Citations',
-            overlaying='y',
-            side='right',
-            tickmode='linear',
-            dtick=y2_tick_interval
-        ),
-        barmode='group',
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
-    )
+        # Update layout to show appropriate ticks
+        fig.update_layout(
+            xaxis=dict(
+                title='Year',
+                tickmode='linear',
+                dtick=x_tick_interval
+            ),
+            yaxis=dict(
+                title='Yearly Citations',
+                tickmode='linear',
+                dtick=y_tick_interval
+            ),
+            yaxis2=dict(
+                title='Cumulative Citations',
+                overlaying='y',
+                side='right',
+                tickmode='linear',
+                dtick=y2_tick_interval
+            ),
+            barmode='group',
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
+        )
 
-    # Show plot
-    st.plotly_chart(fig)
+        # Show plot
+        st.plotly_chart(fig)
 
 
-    # Display dataframe below the chart
-    st.dataframe(
-        df_totals,
-        use_container_width=True,
-        hide_index=False
-    )
+        # Display dataframe below the chart
+        st.dataframe(
+            df_totals,
+            use_container_width=True,
+            hide_index=False
+        )
 
-    st.subheader("Explore Publications")
-    st.markdown("Apply filters to our verified data usage citations and export subsets to CSV.  To export a CSV, mouse over the table and then use the download button in the top right corner.")
+        st.markdown("Apply filters to our verified data usage citations and export subsets to CSV.  To export a CSV, mouse over the table and then use the download button in the top right corner.")
 
-    filtered_endnote_explorer = filter_dataframe(pubs_df)
-    st.dataframe(filtered_endnote_explorer)
+        filtered_endnote_explorer = filter_dataframe(pubs_df)
+        st.dataframe(filtered_endnote_explorer)
 
-    # settings for dropdown menus that control how many authors/keywords in bar charts
-    top_n_options = [10, 25, 50, 100]
+        # settings for dropdown menus that control how many authors/keywords in bar charts
+        top_n_options = [10, 25, 50, 100]
 
-    # Top N Authors
-    st.subheader(f'Top Authors by TCIA Publication Counts')
-    col1, col2 = st.columns([1, 8])
-    with col1:
-        top_n_authors = st.selectbox('Select top N authors', options=top_n_options, index=2)
+        # Top N Authors
+        col1, col2 = st.columns([1, 8])
+        with col1:
+            top_n_authors = st.selectbox('Select top N authors', options=top_n_options, index=1)
 
-    all_authors = [author for sublist in filtered_endnote_explorer['authors'] for author in sublist]
-    author_counts = Counter(all_authors)
-    top_authors = pd.DataFrame(author_counts.most_common(top_n_authors), columns=['Author', 'Count'])
-    fig_authors = px.bar(top_authors, x='Author', y='Count', title=f'Top {top_n_authors} Authors')
-    fig_authors.update_xaxes(tickangle=45)
-    st.plotly_chart(fig_authors)
+        all_authors = [author for sublist in filtered_endnote_explorer['authors'] for author in sublist]
+        author_counts = Counter(all_authors)
+        top_authors = pd.DataFrame(author_counts.most_common(top_n_authors), columns=['Author', 'Count'])
+        fig_authors = px.bar(top_authors, x='Author', y='Count', title=f'Top {top_n_authors} Authors of Verified Publications')
+        fig_authors.update_xaxes(tickangle=45)
+        st.plotly_chart(fig_authors)
 
-    # Reference Type Distribution
-    st.subheader('Reference Type Distribution')
-    ref_type_counts = filtered_endnote_explorer['ref-type-name'].value_counts().reset_index()
-    ref_type_counts.columns = ['Reference Type', 'Count']
-    fig_ref_type = px.bar(ref_type_counts, x='Reference Type', y='Count', title='Reference Type Distribution')
-    fig_ref_type.update_xaxes(tickangle=45)
-    st.plotly_chart(fig_ref_type)
+        # Reference Type Distribution
+        ref_type_counts = filtered_endnote_explorer['ref-type-name'].value_counts().reset_index()
+        ref_type_counts.columns = ['Reference Type', 'Count']
+        fig_ref_type = px.bar(ref_type_counts, x='Reference Type', y='Count', title='Reference Type Distribution')
+        fig_ref_type.update_xaxes(tickangle=45)
+        st.plotly_chart(fig_ref_type)
 
+    # dicom search stats
+    #st.subheader("DICOM Searches Over Time (filter clicks)")
+
+    #fig = px.treemap(
+    #    filtered_df,
+    #    path=["Category", "Search Criteria"],
+    #    values="Clicks",
+    #    title="Search Criteria Popularity by Category"
+    #)
+
+    #st.plotly_chart(fig, use_container_width=True)
+
+    # dicom download stats
     st.subheader("DICOM Downloads Over Time (GBytes)")
 
     dicom_collections = sorted(dicom_df["Collection"].unique().tolist())
