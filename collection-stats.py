@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="Data Usage Statistics - The Cancer Imaging Archive (TCIA)", layout="wide")
 
 # TTL and Cache Time Management
+# can get rid of os and time by switching to built in streamlit @st.cache_data(ttl=86400)  ???
 def should_refresh_cache(ttl: int = 86400):
     """
     Determine whether to refresh the cache based on a TTL (time-to-live).
@@ -82,7 +83,7 @@ def load_datacite_data():
 # function to fetch DICOM searches
 @st.cache_data
 def load_dicom_searches():
-    df = pd.read_excel('https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/search_dicom_2025-04-04.xlsx')
+    df = pd.read_excel('https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/search_dicom_2025-04-07.xlsx')
 
     # Transpose the DataFrame
     transposed_df = df.transpose()  # or simply df.T
@@ -121,7 +122,7 @@ def load_dicom_searches():
 @st.cache_data
 def load_dicom_downloads():
     #url = "https://cancerimagingarchive.net/downloads_dicom.csv"
-    url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_dicom_2025-04-04.xlsx"
+    url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_dicom_2025-04-07.xlsx"
     df = pd.read_excel(url)
 
     # Remove any unnamed columns that might be causing issues
@@ -173,7 +174,7 @@ def load_dicom_downloads():
 @st.cache_data
 def load_dicom_collection_report():
     # ingest summary CSV output of nbia.reportCollectionSummary(series, format = "csv")
-    url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/tcia_collection_report.csv"
+    url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/tcia_collection_report_2025-04-10.csv"
     df_sizes = pd.read_csv(url)
     return df_sizes
 
@@ -195,6 +196,33 @@ def get_combined_text(element):
     if element is None:
         return ''
     return ''.join([text_element.text for text_element in element.findall('.//style') if text_element.text is not None])
+
+@st.cache_data
+def load_and_process_aspera_data():
+    # Read CSV, skip first row since it's junk
+    file = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_aspera_2025-04-09.xlsx"
+    df = pd.read_excel(file, skiprows=1)
+
+    # Rename unnamed first column to 'metric'
+    df = df.rename(columns={df.columns[0]: 'metric'})
+
+    # Melt the dataframe to convert date columns to rows
+    melted_df = pd.melt(
+        df,
+        id_vars=['metric', 'Collection'],
+        var_name='date',
+        value_name='value'
+    )
+
+    # Convert date strings to datetime objects
+    melted_df['date'] = pd.to_datetime(melted_df['date'])
+
+    # Create separate dataframes for each metric
+    complete_downloads = melted_df[melted_df['metric'] == 'Complete Downloads (Count)'].copy()
+    complete_downloads_gb = melted_df[melted_df['metric'] == 'Complete Downloads (GB)'].copy()
+    partial_downloads = melted_df[melted_df['metric'] == 'Partial Downloads (Count)'].copy()
+
+    return complete_downloads, complete_downloads_gb, partial_downloads
 
 # convert the endnote xml to a dataframe
 def parse_xml(xml_file):
@@ -327,33 +355,6 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                     df = df[col_values.astype(str).str.contains(user_text_input, flags=re.IGNORECASE, na=False)]
 
     return df
-
-@st.cache_data
-def load_and_process_aspera_data():
-    # Read CSV, skip first row since it's junk
-    file = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_aspera.xlsx"
-    df = pd.read_excel(file, skiprows=1)
-
-    # Rename unnamed first column to 'metric'
-    df = df.rename(columns={df.columns[0]: 'metric'})
-
-    # Melt the dataframe to convert date columns to rows
-    melted_df = pd.melt(
-        df,
-        id_vars=['metric', 'Collection'],
-        var_name='date',
-        value_name='value'
-    )
-
-    # Convert date strings to datetime objects
-    melted_df['date'] = pd.to_datetime(melted_df['date'])
-
-    # Create separate dataframes for each metric
-    complete_downloads = melted_df[melted_df['metric'] == 'Complete Downloads (Count)'].copy()
-    complete_downloads_gb = melted_df[melted_df['metric'] == 'Complete Downloads (GB)'].copy()
-    partial_downloads = melted_df[melted_df['metric'] == 'Partial Downloads (Count)'].copy()
-
-    return complete_downloads, complete_downloads_gb, partial_downloads
 
 def create_cumulative_visualization(df, title, y_axis_title):
     # Group by date and sum values across all collections
@@ -537,6 +538,8 @@ def create_app():
         )
 
         st.caption("Tip: Plots are interactive. Hover over plots to activate controls that will appear in the top right corner of each plot.  Tables can be exported to CSV files.")
+
+        st.markdown("Last updated: 2025-04-04")
 
         # Add manual refresh button
         #st.markdown("Source data refreshes daily, but can be manually updated using this button.")
