@@ -23,33 +23,6 @@ import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Data Usage Statistics - The Cancer Imaging Archive (TCIA)", layout="wide")
 
-# TTL and Cache Time Management
-# can get rid of os and time by switching to built in streamlit @st.cache_data(ttl=86400)  ???
-def should_refresh_cache(ttl: int = 86400):
-    """
-    Determine whether to refresh the cache based on a TTL (time-to-live).
-    Default TTL is 1 day (86400 seconds).
-    """
-    cache_time_file = "cache_time.txt"
-
-    # Check the timestamp of the last cache
-    if not os.path.exists(cache_time_file):
-        with open(cache_time_file, "w") as f:
-            f.write(str(time.time()))
-        return True  # No cache exists, so refresh
-
-    with open(cache_time_file, "r") as f:
-        last_cache_time = float(f.read().strip())
-
-    # Check if TTL has expired
-    if time.time() - last_cache_time > ttl:
-        # Update the cache time
-        with open(cache_time_file, "w") as f:
-            f.write(str(time.time()))
-        return True  # TTL expired, so refresh
-
-    return False  # TTL not expired, no need to refresh
-
 def get_apa_citation(doi):
     url = f"https://citation.crosscite.org/format?doi={doi}&style=apa"
     headers = {"Accept": "text/plain"}  # Ensure plain text response
@@ -61,7 +34,7 @@ def get_apa_citation(doi):
         return "Error: DOI not found or not available in AMA format."
 
 # Endnote XML Data Loader
-@st.cache_data
+@st.cache_data(ttl=86400)
 def load_endnote_data():
     url = "https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml"
     response = requests.get(url)
@@ -74,14 +47,14 @@ def load_endnote_data():
     return endnote
 
 # Datacite Data Loader
-@st.cache_data
+@st.cache_data(ttl=86400)
 def load_datacite_data():
     """Load TCIA dataset information using datacite"""
     df = datacite.getDoi()
     return df
 
 # function to fetch DICOM searches
-@st.cache_data
+@st.cache_data(ttl=86400)
 def load_dicom_searches():
     df = pd.read_excel('https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/search_dicom_2025-04-07.xlsx')
 
@@ -119,7 +92,7 @@ def load_dicom_searches():
     return melted_df
 
 # Function to fetch DICOM downloads
-@st.cache_data
+@st.cache_data(ttl=86400)
 def load_dicom_downloads():
     #url = "https://cancerimagingarchive.net/downloads_dicom.csv"
     url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_dicom_2025-04-07.xlsx"
@@ -171,16 +144,12 @@ def load_dicom_downloads():
     return df_long
 
 # function to fetch DICOM collection stats to calculate sizes
-@st.cache_data
+@st.cache_data(ttl=86400)
 def load_dicom_collection_report():
     # ingest summary CSV output of nbia.reportCollectionSummary(series, format = "csv")
     url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/tcia_collection_report_2025-04-10.csv"
     df_sizes = pd.read_csv(url)
     return df_sizes
-
-# Refresh cache based on TTL
-if should_refresh_cache(ttl=86400):  # Set TTL to 1 day
-    st.cache_data.clear()  # Clear cache for all functions
 
 # helper functions for parsing the Endnote library to a dataframe
 def replace_newline(s):
@@ -197,11 +166,12 @@ def get_combined_text(element):
         return ''
     return ''.join([text_element.text for text_element in element.findall('.//style') if text_element.text is not None])
 
-@st.cache_data
+@st.cache_data(ttl=86400)
 def load_and_process_aspera_data():
     # Read CSV, skip first row since it's junk
     file = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_aspera_2025-04-09.xlsx"
     df = pd.read_excel(file, skiprows=1)
+    df['Unnamed: 0'] = df['Unnamed: 0'].ffill()
 
     # Rename unnamed first column to 'metric'
     df = df.rename(columns={df.columns[0]: 'metric'})
@@ -214,7 +184,7 @@ def load_and_process_aspera_data():
         value_name='value'
     )
 
-    # Convert date strings to datetime objects
+    # Convert date strings to datetime objects -- Full MONTH YYYY format
     melted_df['date'] = pd.to_datetime(melted_df['date'])
 
     # Create separate dataframes for each metric
@@ -565,7 +535,7 @@ def create_app():
     st.subheader("Verified TCIA Data Usage Citations")
 
     st.markdown("We perform regular literature reviews in order to distinguish papers which explicitly analyzed TCIA datasets from those that simply mention TCIA or its data in some capacity.  You can download an Endnote XML file containing these verified citations [here](https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml).  This file should be usable as input to your favorite reference management system.")
-    st.markdown("Publication years represent the year the paper was published, not the year we added it to our reference library.  There is generally a significant lag time between when papers are published and when we find time to add them to our library due to the amount of effort required to assess each paper and verify our data was actually used.  If you're aware of additional publications that should be on this list, please [notify us](https://www.cancerimagingarchive.net/support/)!")
+    st.markdown("Publication years represent the year the paper was published, not the year we added it to our reference library.  There is generally a significant lag time between when papers are published and when we find time to add them to our library due to the amount of effort required to assess each paper and verify TCIA data was actually used.  If you're aware of additional publications that should be on this list, please [notify us](https://www.cancerimagingarchive.net/support/)!")
 
     # Function to filter rows where 'keywords' contain the dataset value
     def filter_by_keyword(df, keyword):
@@ -703,7 +673,7 @@ def create_app():
         # Create two columns
         col1, col2 = st.columns([2.5, 1.5])
         with col1:
-            st.markdown("The Normalized plot divides the total GBytes downloaded by the size of the Collection to estimate the number of times the full dataset was downloaded.")
+            st.markdown("Since TCIA gives users the option to download partial datasets, we provide here a Normalized Plot that divides the total GBytes downloaded by the size of the Collection to estimate the number of times the full dataset equivalent was downloaded.")
             # Add a radio button to select plot type
             plot_type = st.radio(
                 "Choose plot type:",
