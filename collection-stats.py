@@ -449,6 +449,7 @@ def create_app():
     # Load datacite data
     try:
         df = load_datacite_data()
+        #st.dataframe(df)
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
         return
@@ -531,6 +532,54 @@ def create_app():
         st.info(f"{citation}")
         st.markdown("Please remember to always include the full dataset citation in your publication references to help ensure accurate usage metrics.")
 
+    st.subheader("Page Views")
+    st.markdown("We leverage DataCite's Make Data Count initiative to track page views of our datasets.  See how yours stacks up to the others in TCIA using the zoom and pan functions for the plot below.  These controls appear in the top right corner of the plot after you mouse over it.  Your dataset will appear at the top of the list to make it easier to find.")
+
+    # Create a copy of the original DataFrame
+    page_views_df = df.copy()
+
+    # Filter out rows with zero ViewCount
+    page_views_df = page_views_df[page_views_df['ViewCount'] > 0]
+
+    # Sort the DataFrame by ViewCount in descending order
+    page_views_df = page_views_df.sort_values(by='ViewCount', ascending=False)
+
+    # If the dataset value is not in the Identifiers, handle gracefully
+    if dataset not in page_views_df['Identifier'].values:
+        dataset = page_views_df['Identifier'].iloc[0]  # Default to the first Identifier if not found
+
+    # Create a Streamlit select box pre-populated with the 'dataset' value
+    selected_identifier = st.selectbox(
+        "Search for an Identifier:",
+        page_views_df['Identifier'],
+        index=page_views_df['Identifier'].tolist().index(dataset)  # Pre-select the dataset value
+    )
+
+    # Highlight the selected Identifier in the chart
+    highlighted_data = page_views_df.copy()
+    highlighted_data['Highlight'] = highlighted_data['Identifier'].apply(
+        lambda x: 'Selected' if x == selected_identifier else 'Others'
+    )
+
+    fig = px.bar(
+        highlighted_data,
+        x='ViewCount',
+        y='Identifier',
+        orientation='h',
+        text='ViewCount',
+        color='Highlight',  # Differentiate the selected Identifier visually
+        hover_data=['Title', 'URL']
+    )
+
+    fig.update_layout(
+        title='Page views by Dataset',
+        xaxis_title='ViewCount',
+        yaxis_title='Dataset Identifier',
+        yaxis=dict(showticklabels=True, automargin=True),
+        height=800
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
     st.subheader("Verified TCIA Data Usage Citations")
 
