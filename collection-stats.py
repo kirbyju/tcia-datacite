@@ -141,7 +141,15 @@ def load_dicom_downloads():
     # Drop rows where 'Downloads' is 0
     df_long = df_long[df_long["Downloads"] != 0]
 
-    return df_long
+    # TEMPORARY FIX Filter out rows where 'Collection' contains 'LDCT-and-Projection-data' AND 'Date' is in February or March of 2025
+    df_long_filtered = df_long[
+        ~((df_long['Collection'] == 'LDCT-and-Projection-data') &
+          (df_long['Date'].dt.year == 2025) &
+          (df_long['Date'].dt.month.isin([2, 3])))
+    ]
+
+    # TEMPORARY FIX -- revert to df_long once LDCT source data are corrected
+    return df_long_filtered
 
 # function to fetch DICOM collection stats to calculate sizes
 @st.cache_data(ttl=86400)
@@ -183,6 +191,9 @@ def load_and_process_aspera_data():
         var_name='date',
         value_name='value'
     )
+
+    # TEMPORARY FIX: Replace all occurrences of 'Bone-Marrow-Cytomorphology' in the entire DataFrame
+    melted_df = melted_df.replace('Bone-Marrow-Cytomorphology', 'Bone-Marrow-Cytomorphology_MLL_Helmholtz_Fraunhofer')
 
     # Convert date strings to datetime objects -- Full MONTH YYYY format
     melted_df['date'] = pd.to_datetime(melted_df['date'])
@@ -456,6 +467,7 @@ def create_app():
 
     # load and process aspera downloads
     complete_downloads, complete_downloads_gb, partial_downloads = load_and_process_aspera_data()
+    st.dataframe(complete_downloads)
 
     # Load DICOM search metrics
     try:
