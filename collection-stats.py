@@ -467,7 +467,7 @@ def create_app():
 
     # load and process aspera downloads
     complete_downloads, complete_downloads_gb, partial_downloads = load_and_process_aspera_data()
-    st.dataframe(complete_downloads)
+    #st.dataframe(complete_downloads)
 
     # Load DICOM search metrics
     try:
