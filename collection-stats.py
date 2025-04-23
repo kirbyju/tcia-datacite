@@ -18,7 +18,7 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import re
 from collections import Counter
-from wordcloud import WordCloud
+#from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Data Usage Statistics - The Cancer Imaging Archive (TCIA)", layout="wide")
@@ -544,54 +544,86 @@ def create_app():
         st.info(f"{citation}")
         st.markdown("Please remember to always include the full dataset citation in your publication references to help ensure accurate usage metrics.")
 
-    st.subheader("Page Views")
-    st.markdown("We leverage DataCite's Make Data Count initiative to track page views of our datasets.  See how yours stacks up to the others in TCIA using the zoom and pan functions for the plot below.  These controls appear in the top right corner of the plot after you mouse over it.  Your dataset will appear at the top of the list to make it easier to find.")
-
+    st.subheader("\"Make Data Count\" Page Views")
     # Create a copy of the original DataFrame
     page_views_df = df.copy()
 
     # Filter out rows with zero ViewCount
     page_views_df = page_views_df[page_views_df['ViewCount'] > 0]
 
-    # Sort the DataFrame by ViewCount in descending order
-    page_views_df = page_views_df.sort_values(by='ViewCount', ascending=False)
-
-    # If the dataset value is not in the Identifiers, handle gracefully
+    # Ensure selected dataset is available
     if dataset not in page_views_df['Identifier'].values:
-        dataset = page_views_df['Identifier'].iloc[0]  # Default to the first Identifier if not found
+        dataset = page_views_df['Identifier'].iloc[0]
 
-    # Create a Streamlit select box pre-populated with the 'dataset' value
-    selected_identifier = st.selectbox(
-        "Search for an Identifier:",
-        page_views_df['Identifier'],
-        index=page_views_df['Identifier'].tolist().index(dataset)  # Pre-select the dataset value
-    )
-
-    # Highlight the selected Identifier in the chart
+    # Add 'Highlight' to main dataframe early
     highlighted_data = page_views_df.copy()
+    highlighted_data['Created'] = pd.to_datetime(highlighted_data['Created'])
+    highlighted_data['Year'] = highlighted_data['Created'].dt.year
     highlighted_data['Highlight'] = highlighted_data['Identifier'].apply(
-        lambda x: 'Selected' if x == selected_identifier else 'Others'
+        lambda x: 'Selected' if x == dataset else 'Others'
     )
 
-    fig = px.bar(
-        highlighted_data,
+    #  Mixed Strategy (Top-N Bar + Year-Based Comparison)
+    top_n_option = 25
+
+    # Convert selection to int or handle "All"
+    if top_n_option == "All":
+        top_n = len(page_views_df)
+    else:
+        top_n = int(top_n_option)
+
+    selected_row = highlighted_data[highlighted_data['Identifier'] == dataset]
+    subset_df = pd.concat([highlighted_data.nlargest(top_n, 'ViewCount'), selected_row]).drop_duplicates('Identifier')
+
+    subset_df['Highlight'] = subset_df['Identifier'].apply(
+        lambda x: 'Selected' if x == dataset else 'Others'
+    )
+
+    # Compare to average for the dataset's publication year
+    same_year = highlighted_data[highlighted_data['Year'] == selected_row['Year'].values[0]]
+    year_avg = same_year['ViewCount'].mean()
+    sel_views = selected_row['ViewCount'].values[0]
+
+    st.markdown("We leverage DataCite's [Make Data Count](https://makedatacount.org/) initiative to track page views of our datasets.  See how yours compares to the top 25 viewed datasets in TCIA in the plot below.  Your dataset will be highlighted to make it easier to find.")
+
+    st.metric(
+        label=f"Total Page Views for this dataset compared to the average:",
+        value=sel_views,
+        delta=f"{sel_views - year_avg:.0f} views vs. {selected_row['Year'].values[0]} average"
+    )
+
+
+    fig_bar = px.bar(
+        subset_df.sort_values('ViewCount', ascending=False),
         x='ViewCount',
         y='Identifier',
         orientation='h',
         text='ViewCount',
-        color='Highlight',  # Differentiate the selected Identifier visually
-        hover_data=['Title', 'URL']
+        color='Highlight',
+        hover_data=['Title', 'URL', 'Year']
     )
 
-    fig.update_layout(
-        title='Page views by Dataset',
-        xaxis_title='ViewCount',
+    fig_bar.update_layout(
+        title='Top Datasets by Total Page Views',
+        xaxis_title='View Count',
         yaxis_title='Dataset Identifier',
-        yaxis=dict(showticklabels=True, automargin=True),
         height=800
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig_bar, use_container_width=True)
+
+    # treemap grouped by year
+    fig_treemap = px.treemap(
+        highlighted_data,
+        path=['Year', 'Identifier'],
+        values='ViewCount',
+        color='Highlight',
+        hover_data={'Title': True, 'URL': True, 'ViewCount': True}
+    )
+
+    fig_treemap.update_layout(title='Dataset Popularity Treemap (Grouped by Year of Publication)')
+    st.markdown("This treemap visualizes page views grouped by the year each dataset was released. Click on a year or dataset to zoom in.  Click the horizontal bar/space along the top of the plot to zoom back out.")
+    st.plotly_chart(fig_treemap, use_container_width=True)
 
     st.subheader("Verified TCIA Data Usage Citations")
 
