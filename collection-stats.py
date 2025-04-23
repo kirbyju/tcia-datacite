@@ -200,8 +200,16 @@ def load_and_process_aspera_data():
 
     # Create separate dataframes for each metric
     complete_downloads = melted_df[melted_df['metric'] == 'Complete Downloads (Count)'].copy()
+    # Drop rows where 'value' is 0 or None
+    complete_downloads = complete_downloads[(complete_downloads["value"] != 0) & (complete_downloads["value"].notnull())]
+
     complete_downloads_gb = melted_df[melted_df['metric'] == 'Complete Downloads (GB)'].copy()
+    # Drop rows where 'value' is 0 or None
+    complete_downloads_gb = complete_downloads_gb[(complete_downloads_gb["value"] != 0) & (complete_downloads_gb["value"].notnull())]
+
     partial_downloads = melted_df[melted_df['metric'] == 'Partial Downloads (Count)'].copy()
+    # Drop rows where 'value' is 0 or None
+    partial_downloads = partial_downloads[(partial_downloads["value"] != 0) & (partial_downloads["value"].notnull())]
 
     return complete_downloads, complete_downloads_gb, partial_downloads
 
@@ -607,7 +615,14 @@ def create_app():
         title='Top Datasets by Total Page Views',
         xaxis_title='View Count',
         yaxis_title='Dataset Identifier',
-        height=800
+        height=800,
+        legend=dict(
+            title='Dataset Name',
+            font=dict(size=18),  # Increase font size here
+            bgcolor='rgba(255,255,255,0.8)',  # Optional: semi-transparent background
+            bordercolor='black',
+            borderwidth=1
+        )
     )
 
     st.plotly_chart(fig_bar, use_container_width=True)
@@ -624,114 +639,6 @@ def create_app():
     fig_treemap.update_layout(title='Dataset Popularity Treemap (Grouped by Year of Publication)')
     st.markdown("This treemap visualizes page views grouped by the year each dataset was released. Click on a year or dataset to zoom in.  Click the horizontal bar/space along the top of the plot to zoom back out.")
     st.plotly_chart(fig_treemap, use_container_width=True)
-
-    st.subheader("Verified TCIA Data Usage Citations")
-
-    st.markdown("We perform regular literature reviews in order to distinguish papers which explicitly analyzed TCIA datasets from those that simply mention TCIA or its data in some capacity.  You can download an Endnote XML file containing these verified citations [here](https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml).  This file should be usable as input to your favorite reference management system.")
-    st.markdown("Publication years represent the year the paper was published, not the year we added it to our reference library.  There is generally a significant lag time between when papers are published and when we find time to add them to our library due to the amount of effort required to assess each paper and verify TCIA data was actually used.  If you're aware of additional publications that should be on this list, please [notify us](https://www.cancerimagingarchive.net/support/)!")
-
-    # Function to filter rows where 'keywords' contain the dataset value
-    def filter_by_keyword(df, keyword):
-        return df[df['keywords'].apply(lambda x: keyword in x)]
-
-    # Filter the DataFrame
-    pubs_df = filter_by_keyword(pubs_df, dataset)
-
-    if pubs_df.empty:
-        st.warning("There are no Verified Citations that we're aware of using this dataset. Please contact us if there are any you'd like to add!")
-    else:
-        # Count publications per year
-        pubs_per_year = pubs_df['year'].value_counts().sort_index()
-        # Calculate cumulative publications
-        cumulative_pubs = pubs_per_year.cumsum()
-
-        # Create a dataframe with yearly totals in columns
-        df_totals = pd.DataFrame({
-            'Publications per Year': pubs_per_year,
-            'Cumulative Publications': cumulative_pubs
-        }).T  # Transpose to make years column headers
-
-        # Rename the index to make it more descriptive
-        df_totals.index.name = 'Metric'
-
-        # Function to determine appropriate tick intervals
-        def determine_tick_interval(values):
-            values = [int(value) for value in values if value is not None and value != '']
-            if len(values) < 2:
-                return 1
-            range_values = max(values) - min(values)
-            return max(1, range_values // 5)
-
-        # Create the chart
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=pubs_per_year.index, y=pubs_per_year.values, name='Yearly Citations'))
-        fig.add_trace(go.Scatter(x=cumulative_pubs.index, y=cumulative_pubs.values, mode='lines+markers', name='Cumulative Citations', yaxis='y2'))
-
-        # Determine tick intervals for years and citations
-        x_tick_interval = determine_tick_interval(pubs_per_year.index)
-        y_tick_interval = determine_tick_interval(pubs_per_year.values)
-        y2_tick_interval = determine_tick_interval(cumulative_pubs.values)
-
-        # Update layout to show appropriate ticks
-        fig.update_layout(
-            xaxis=dict(
-                title='Year',
-                tickmode='linear',
-                dtick=x_tick_interval
-            ),
-            yaxis=dict(
-                title='Yearly Citations',
-                tickmode='linear',
-                dtick=y_tick_interval
-            ),
-            yaxis2=dict(
-                title='Cumulative Citations',
-                overlaying='y',
-                side='right',
-                tickmode='linear',
-                dtick=y2_tick_interval
-            ),
-            barmode='group',
-            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
-        )
-
-        # Show plot
-        st.plotly_chart(fig)
-
-
-        # Display dataframe below the chart
-        st.dataframe(
-            df_totals,
-            use_container_width=True,
-            hide_index=False
-        )
-
-        st.markdown("Apply filters to our verified data usage citations and export subsets to CSV.  To export a CSV, mouse over the table and then use the download button in the top right corner.")
-
-        filtered_endnote_explorer = filter_dataframe(pubs_df)
-        st.dataframe(filtered_endnote_explorer)
-
-        # settings for dropdown menus that control how many authors/keywords in bar charts
-        top_n_options = [10, 25, 50, 100]
-
-        # Top N Authors
-        col1, col2 = st.columns([1, 8])
-        with col1:
-            top_n_authors = st.selectbox('Select top N authors', options=top_n_options, index=1)
-
-        all_authors = [author for sublist in filtered_endnote_explorer['authors'] for author in sublist]
-        author_counts = Counter(all_authors)
-        top_authors = pd.DataFrame(author_counts.most_common(top_n_authors), columns=['Author', 'Count'])
-        fig_authors = px.bar(top_authors, x='Author', y='Count', title=f'Top {top_n_authors} Authors of Verified Publications')
-        fig_authors.update_xaxes(tickangle=45)
-        st.plotly_chart(fig_authors)
-
-        # Reference Type Distribution
-        ref_type_counts = filtered_endnote_explorer['ref-type-name'].value_counts().reset_index()
-        ref_type_counts.columns = ['Reference Type', 'Count']
-        fig_ref_type = px.bar(ref_type_counts, x='Reference Type', y='Count', title='Reference Type Distribution')
-        fig_ref_type.update_xaxes(tickangle=45)
-        st.plotly_chart(fig_ref_type)
 
     # dicom search stats
     #st.subheader("DICOM Searches Over Time (filter clicks)")
@@ -811,7 +718,7 @@ def create_app():
             )
 
             fig_time.update_layout(
-                margin=dict(b=80)  # Add some bottom margin for rotated labels
+                margin=dict(b=80),  # Add some bottom margin for rotated labels
             )
 
             st.plotly_chart(fig_time, use_container_width=True)
@@ -890,6 +797,114 @@ def create_app():
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning(f'This dataset does not have any Non-DICOM Downloads: {dataset}')
+
+    st.subheader("Verified TCIA Data Usage Citations")
+
+    st.markdown("We perform regular literature reviews in order to distinguish papers which explicitly analyzed TCIA datasets from those that simply mention TCIA or its data in some capacity.  You can download an Endnote XML file containing these verified citations [here](https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml).  This file should be usable as input to your favorite reference management system.")
+    st.markdown("Publication years represent the year the paper was published, not the year we added it to our reference library.  There is generally a significant lag time between when papers are published and when we find time to add them to our library due to the amount of effort required to assess each paper and verify TCIA data was actually used.  If you're aware of additional publications that should be on this list, please [notify us](https://www.cancerimagingarchive.net/support/)!")
+
+    # Function to filter rows where 'keywords' contain the dataset value
+    def filter_by_keyword(df, keyword):
+        return df[df['keywords'].apply(lambda x: keyword in x)]
+
+    # Filter the DataFrame
+    pubs_df = filter_by_keyword(pubs_df, dataset)
+
+    if pubs_df.empty:
+        st.warning("There are no Verified Citations that we're aware of using this dataset. Please contact us if there are any you'd like to add!")
+    else:
+        # Count publications per year
+        pubs_per_year = pubs_df['year'].value_counts().sort_index()
+        # Calculate cumulative publications
+        cumulative_pubs = pubs_per_year.cumsum()
+
+        # Create a dataframe with yearly totals in columns
+        df_totals = pd.DataFrame({
+            'Publications per Year': pubs_per_year,
+            'Cumulative Publications': cumulative_pubs
+        }).T  # Transpose to make years column headers
+
+        # Rename the index to make it more descriptive
+        df_totals.index.name = 'Metric'
+
+        # Function to determine appropriate tick intervals
+        def determine_tick_interval(values):
+            values = [int(value) for value in values if value is not None and value != '']
+            if len(values) < 2:
+                return 1
+            range_values = max(values) - min(values)
+            return max(1, range_values // 5)
+
+        # Create the chart
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=pubs_per_year.index, y=pubs_per_year.values, name='Yearly Citations'))
+        fig.add_trace(go.Scatter(x=cumulative_pubs.index, y=cumulative_pubs.values, mode='lines+markers', name='Cumulative Citations', yaxis='y2'))
+
+        # Determine tick intervals for years and citations
+        x_tick_interval = determine_tick_interval(pubs_per_year.index)
+        y_tick_interval = determine_tick_interval(pubs_per_year.values)
+        y2_tick_interval = determine_tick_interval(cumulative_pubs.values)
+
+        # Update layout to show appropriate ticks
+        fig.update_layout(
+            xaxis=dict(
+                title='Year',
+                tickmode='linear',
+                dtick=x_tick_interval
+            ),
+            yaxis=dict(
+                title='Yearly Citations',
+                tickmode='linear',
+                dtick=y_tick_interval
+            ),
+            yaxis2=dict(
+                title='Cumulative Citations',
+                overlaying='y',
+                side='right',
+                tickmode='linear',
+                dtick=y2_tick_interval
+            ),
+            barmode='group',
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5, font=dict(size=18))
+        )
+
+        # Show plot
+        st.plotly_chart(fig)
+
+
+        # Display dataframe below the chart
+        st.dataframe(
+            df_totals,
+            use_container_width=True,
+            hide_index=False
+        )
+
+        st.markdown("Apply filters to our verified data usage citations and export subsets to CSV.  To export a CSV, mouse over the table and then use the download button in the top right corner.")
+
+        filtered_endnote_explorer = filter_dataframe(pubs_df)
+        st.dataframe(filtered_endnote_explorer)
+
+        # settings for dropdown menus that control how many authors/keywords in bar charts
+        top_n_options = [10, 25, 50, 100]
+
+        # Top N Authors
+        col1, col2 = st.columns([1, 8])
+        with col1:
+            top_n_authors = st.selectbox('Select top N authors', options=top_n_options, index=1)
+
+        all_authors = [author for sublist in filtered_endnote_explorer['authors'] for author in sublist]
+        author_counts = Counter(all_authors)
+        top_authors = pd.DataFrame(author_counts.most_common(top_n_authors), columns=['Author', 'Count'])
+        fig_authors = px.bar(top_authors, x='Author', y='Count', title=f'Top {top_n_authors} Authors of Verified Publications')
+        fig_authors.update_xaxes(tickangle=45)
+        st.plotly_chart(fig_authors)
+
+        # Reference Type Distribution
+        ref_type_counts = filtered_endnote_explorer['ref-type-name'].value_counts().reset_index()
+        ref_type_counts.columns = ['Reference Type', 'Count']
+        fig_ref_type = px.bar(ref_type_counts, x='Reference Type', y='Count', title='Reference Type Distribution')
+        fig_ref_type.update_xaxes(tickangle=45)
+        st.plotly_chart(fig_ref_type)
 
 if __name__ == "__main__":
     create_app()
