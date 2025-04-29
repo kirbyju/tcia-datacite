@@ -548,7 +548,7 @@ def create_app():
         citation = get_apa_citation(doi)
 
         # Display citation
-        st.subheader("Citation:")
+        st.subheader("Citation")
         st.info(f"{citation}")
         st.markdown("Please remember to always include the full dataset citation in your publication references to help ensure accurate usage metrics.")
 
@@ -558,6 +558,20 @@ def create_app():
 
     # Filter out rows with zero ViewCount
     page_views_df = page_views_df[page_views_df['ViewCount'] > 0]
+
+    # Convert page views to monthly averages instead of cumulative totals
+    # Note: Page view tracking was implemented around Oct 2024 so treat everything created prior to Nov 2024 as "created" 11-1-2024
+    tracking_start_date = pd.to_datetime("2024-11-01")
+    today = pd.to_datetime(datetime.today().date())  # Current date when the app runs
+    page_views_df["Created"] = pd.to_datetime(page_views_df["Created"])
+
+    # use later of dates: created vs tracking_start_date
+    effective_created = page_views_df["Created"].apply(lambda d: max(d, tracking_start_date))
+
+    months_elapsed = (today.year - effective_created.dt.year) * 12 + (today.month - effective_created.dt.month)
+    months_elapsed = months_elapsed.clip(lower=1)
+
+    page_views_df["monthly_views"] = page_views_df["ViewCount"] / months_elapsed
 
     # Ensure selected dataset is available
     if dataset not in page_views_df['Identifier'].values:
@@ -581,7 +595,7 @@ def create_app():
         top_n = int(top_n_option)
 
     selected_row = highlighted_data[highlighted_data['Identifier'] == dataset]
-    subset_df = pd.concat([highlighted_data.nlargest(top_n, 'ViewCount'), selected_row]).drop_duplicates('Identifier')
+    subset_df = pd.concat([highlighted_data.nlargest(top_n, 'monthly_views'), selected_row]).drop_duplicates('Identifier')
 
     subset_df['Highlight'] = subset_df['Identifier'].apply(
         lambda x: 'Selected' if x == dataset else 'Others'
@@ -589,8 +603,8 @@ def create_app():
 
     # Compare to average for the dataset's publication year
     same_year = highlighted_data[highlighted_data['Year'] == selected_row['Year'].values[0]]
-    year_avg = same_year['ViewCount'].mean()
-    sel_views = selected_row['ViewCount'].values[0]
+    year_avg = same_year['monthly_views'].mean()
+    sel_views = selected_row['monthly_views'].values[0]
 
     st.markdown("We leverage DataCite's [Make Data Count](https://makedatacount.org/) initiative to track page views of our datasets.  See how yours compares to the top 25 viewed datasets in TCIA in the plot below.  Your dataset will be highlighted to make it easier to find.")
 
@@ -602,11 +616,11 @@ def create_app():
 
 
     fig_bar = px.bar(
-        subset_df.sort_values('ViewCount', ascending=False),
-        x='ViewCount',
+        subset_df.sort_values('monthly_views', ascending=False),
+        x='monthly_views',
         y='Identifier',
         orientation='h',
-        text='ViewCount',
+        text='monthly_views',
         color='Highlight',
         hover_data=['Title', 'URL', 'Year']
     )
@@ -631,13 +645,13 @@ def create_app():
     fig_treemap = px.treemap(
         highlighted_data,
         path=['Year', 'Identifier'],
-        values='ViewCount',
+        values='monthly_views',
         color='Highlight',
-        hover_data={'Title': True, 'URL': True, 'ViewCount': True}
+        hover_data={'Title': True, 'URL': True, 'monthly_views': True}
     )
 
 
-    st.markdown('## Dataset Popularity Treemap (Grouped by Year of Publication)')
+    st.subheader('Dataset Popularity Treemap (Grouped by Year of Publication)')
     st.markdown("This treemap visualizes page views grouped by the year each dataset was released. Click on a year or dataset to zoom in.  Click the horizontal bar/space along the top of the plot to zoom back out.")
     st.plotly_chart(fig_treemap, use_container_width=True)
 
