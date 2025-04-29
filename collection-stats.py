@@ -11,6 +11,7 @@ from pandas.api.types import (
 import requests
 import os
 import time
+from datetime import datetime
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -561,9 +562,12 @@ def create_app():
 
     # Convert page views to monthly averages instead of cumulative totals
     # Note: Page view tracking was implemented around Oct 2024 so treat everything created prior to Nov 2024 as "created" 11-1-2024
-    tracking_start_date = pd.to_datetime("2024-11-01")
+    #tracking_start_date = pd.to_datetime("2024-11-01")
+    tracking_start_date = pd.to_datetime("2024-11-01").tz_localize(None)
     today = pd.to_datetime(datetime.today().date())  # Current date when the app runs
-    page_views_df["Created"] = pd.to_datetime(page_views_df["Created"])
+    #page_views_df["Created"] = pd.to_datetime(page_views_df["Created"])
+    page_views_df["Created"] = pd.to_datetime(page_views_df["Created"]).dt.tz_localize(None)
+
 
     # use later of dates: created vs tracking_start_date
     effective_created = page_views_df["Created"].apply(lambda d: max(d, tracking_start_date))
@@ -609,7 +613,7 @@ def create_app():
     st.markdown("We leverage DataCite's [Make Data Count](https://makedatacount.org/) initiative to track page views of our datasets.  See how yours compares to the top 25 viewed datasets in TCIA in the plot below.  Your dataset will be highlighted to make it easier to find.")
 
     st.metric(
-        label=f"Total Page Views for this dataset compared to the average:",
+        label=f"Monthly Page Views for this dataset compared to the average:",
         value=sel_views,
         delta=f"{sel_views - year_avg:.0f} views vs. {selected_row['Year'].values[0]} average"
     )
@@ -626,7 +630,7 @@ def create_app():
     )
 
     fig_bar.update_layout(
-        title='Top Datasets by Total Page Views',
+        title='Top Datasets by Monthly Page Views',
         xaxis_title='View Count',
         yaxis_title='Dataset Identifier',
         height=800,
