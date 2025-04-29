@@ -552,7 +552,7 @@ def create_app():
         st.info(f"{citation}")
         st.markdown("Please remember to always include the full dataset citation in your publication references to help ensure accurate usage metrics.")
 
-    st.subheader("\"Make Data Count\" Page Views")
+    st.subheader("Page Views")
     # Create a copy of the original DataFrame
     page_views_df = df.copy()
 
@@ -636,7 +636,8 @@ def create_app():
         hover_data={'Title': True, 'URL': True, 'ViewCount': True}
     )
 
-    fig_treemap.update_layout(title='Dataset Popularity Treemap (Grouped by Year of Publication)')
+
+    st.markdown('## Dataset Popularity Treemap (Grouped by Year of Publication)')
     st.markdown("This treemap visualizes page views grouped by the year each dataset was released. Click on a year or dataset to zoom in.  Click the horizontal bar/space along the top of the plot to zoom back out.")
     st.plotly_chart(fig_treemap, use_container_width=True)
 
