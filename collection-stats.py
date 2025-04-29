@@ -656,7 +656,7 @@ def create_app():
 
 
     st.subheader('Dataset Popularity Treemap (Grouped by Year of Publication)')
-    st.markdown("This treemap visualizes page views grouped by the year each dataset was released. Click on a year or dataset to zoom in.  Click the horizontal bar/space along the top of the plot to zoom back out.")
+    st.markdown("This treemap visualizes page views grouped by the year each dataset was released. **The year in red is the year this dataset was published on TCIA**. Click on a year or dataset to zoom in.  Click the horizontal bar/space along the top of the plot to zoom back out.")
     st.plotly_chart(fig_treemap, use_container_width=True)
 
     # dicom search stats
