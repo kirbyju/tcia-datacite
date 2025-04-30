@@ -343,7 +343,6 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                 )
                 if user_text_input:
                     df = df[col_values.astype(str).str.contains(user_text_input, flags=re.IGNORECASE, na=False)]
-
     return df
 
 def create_cumulative_visualization(df, title, y_axis_title):
@@ -562,10 +561,8 @@ def create_app():
 
     # Convert page views to monthly averages instead of cumulative totals
     # Note: Page view tracking was implemented around Oct 2024 so treat everything created prior to Nov 2024 as "created" 11-1-2024
-    #tracking_start_date = pd.to_datetime("2024-11-01")
     tracking_start_date = pd.to_datetime("2024-11-01").tz_localize(None)
     today = pd.to_datetime(datetime.today().date())  # Current date when the app runs
-    #page_views_df["Created"] = pd.to_datetime(page_views_df["Created"])
     page_views_df["Created"] = pd.to_datetime(page_views_df["Created"]).dt.tz_localize(None)
 
 
@@ -605,17 +602,20 @@ def create_app():
         lambda x: 'Selected' if x == dataset else 'Others'
     )
 
-    # Compare to average for the dataset's publication year
-    same_year = highlighted_data[highlighted_data['Year'] == selected_row['Year'].values[0]]
-    year_avg = same_year['monthly_views'].mean()
-    sel_views = selected_row['monthly_views'].values[0]
-
     st.markdown("We leverage DataCite's [Make Data Count](https://makedatacount.org/) initiative to track page views of our datasets.  See how yours compares to the top 25 viewed datasets in TCIA in the plot below.  Your dataset will be highlighted to make it easier to find.")
 
+    # trying to reduce space between markdown text and subsequent metric widget
+    st.markdown(
+    "<div style='margin-bottom: -20px'><strong>Monthly Page Views for this dataset:</strong></div>",
+    unsafe_allow_html=True
+)
+
+    sel_views = selected_row['monthly_views'].values[0]
+    monthly_avg = page_views_df['monthly_views'].mean()
     st.metric(
-        label=f"Monthly Page Views for this dataset compared to the average:",
+        label="",
         value=sel_views,
-        delta=f"{sel_views - year_avg:.0f} views vs. {selected_row['Year'].values[0]} average"
+        delta=f"{sel_views - monthly_avg:.0f} monthly views compared to the {monthly_avg:.0f} average"
     )
 
 
@@ -901,13 +901,13 @@ def create_app():
         st.markdown("Apply filters to our verified data usage citations and export subsets to CSV.  To export a CSV, mouse over the table and then use the download button in the top right corner.")
 
         filtered_endnote_explorer = filter_dataframe(pubs_df)
-        st.dataframe(filtered_endnote_explorer)
+        st.dataframe(filtered_endnote_explorer.reset_index(drop=True), hide_index=True)
 
         # settings for dropdown menus that control how many authors/keywords in bar charts
         top_n_options = [10, 25, 50, 100]
 
         # Top N Authors
-        col1, col2 = st.columns([1, 8])
+        col1, col2 = st.columns([2, 6])
         with col1:
             top_n_authors = st.selectbox('Select top N authors', options=top_n_options, index=1)
 
