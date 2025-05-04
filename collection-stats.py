@@ -644,7 +644,7 @@ def create_app():
     )
 
     # Format text to show whole numbers
-    fig_bar.update_traces(texttemplate="%{x:.0f}", textposition="outside")
+    fig_bar.update_traces(texttemplate="%{x:.0f}")
 
     st.plotly_chart(fig_bar, use_container_width=True)
 
