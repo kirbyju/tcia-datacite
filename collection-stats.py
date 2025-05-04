@@ -614,7 +614,7 @@ def create_app():
     monthly_avg = page_views_df['monthly_views'].mean()
     st.metric(
         label="",
-        value=sel_views,
+        value=f"{sel_views:.0f}",
         delta=f"{sel_views - monthly_avg:.0f} monthly views compared to the {monthly_avg:.0f} average"
     )
 
@@ -642,6 +642,9 @@ def create_app():
             borderwidth=1
         )
     )
+
+    # Format text to show whole numbers
+    fig_bar.update_traces(texttemplate="%{x:.0f}", textposition="outside")
 
     st.plotly_chart(fig_bar, use_container_width=True)
 
