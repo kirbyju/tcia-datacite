@@ -16,8 +16,8 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import re
 from collections import Counter
-from wordcloud import WordCloud
-import matplotlib.pyplot as plt
+#from wordcloud import WordCloud
+#import matplotlib.pyplot as plt
 import random
 
 st.set_page_config(page_title="Publications - The Cancer Imaging Archive (TCIA)", layout="wide")
