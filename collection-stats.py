@@ -20,7 +20,7 @@ import xml.etree.ElementTree as ET
 import re
 from collections import Counter
 #from wordcloud import WordCloud
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Data Usage Statistics - The Cancer Imaging Archive (TCIA)", layout="wide")
 
