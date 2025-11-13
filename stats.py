@@ -16,6 +16,7 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import re
 from collections import Counter
+from bs4 import BeautifulSoup
 #from wordcloud import WordCloud
 #import matplotlib.pyplot as plt
 import random
@@ -461,34 +462,37 @@ def create_app():
     elif page == "TCIA Staff Publications":
         st.subheader("TCIA Staff Publications")
         st.markdown("This page summarizes publications about TCIA authored by our team members.")
-        # Confluence base URL and page ID
-        CONFLUENCE_URL = "https://wiki.cancerimagingarchive.net"
-        PAGE_ID = "52758446"  # Replace with your Confluence page ID
+        # Wordpress URL
+        WORDPRESS_URL = "https://www.cancerimagingarchive.net/publications-authored-by-tcia/"
 
         @st.cache_data
-        def fetch_public_confluence_page(page_id):
-            url = f"{CONFLUENCE_URL}/rest/api/content/{page_id}"
-            params = {
-                "expand": "body.view",  # Use 'body.view' for public content
-            }
-            response = requests.get(url, params=params)
+        def fetch_wordpress_page(url):
+            """
+            Fetches and parses the content of a WordPress page.
+            """
+            response = requests.get(url)
             if response.status_code == 200:
-                return response.json()
+                soup = BeautifulSoup(response.content, 'html.parser')
+                # Find the ordered list of publications
+                content = soup.find('ol')
+                if content:
+                    return str(content)
+                else:
+                    return "Could not find publications list."
             else:
                 st.error(f"Failed to fetch page: {response.status_code}")
                 return None
 
         # Fetch and display the page
-        page_data = fetch_public_confluence_page(PAGE_ID)
-        if page_data:
-            page_url = f"{CONFLUENCE_URL}/pages/viewpage.action?pageId={PAGE_ID}"
-            st.markdown(page_data["body"]["view"]["value"], unsafe_allow_html=True)
+        page_content = fetch_wordpress_page(WORDPRESS_URL)
+        if page_content:
+            st.markdown(page_content, unsafe_allow_html=True)
         else:
-            st.warning("Unable to fetch the page content. Please check the page ID.")
+            st.warning("Unable to fetch the page content.")
 
         col1, col2 = st.columns([10, 2])
         with col1:
-            st.markdown(f"[View on Confluence]({page_url})", unsafe_allow_html=True)
+            st.markdown(f"[View on cancerimagingarchive.net]({WORDPRESS_URL})", unsafe_allow_html=True)
         with col2:
             if st.button("🗑️ Clear Cache", help="Click to clear cached data"):
                 st.cache_data.clear()
