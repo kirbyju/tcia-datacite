@@ -71,7 +71,8 @@ def load_endnote_data():
             f.write(response.content)
 
     endnote = parse_xml('Pubs_basedon_TCIA.xml')
-    endnote['electronic-resource-num'] = endnote['electronic-resource-num'].str.strip()
+    if 'electronic-resource-num' in endnote.columns:
+        endnote['electronic-resource-num'] = endnote['electronic-resource-num'].str.strip()
     return endnote
 
 # Datacite Data Loader
@@ -102,22 +103,16 @@ def get_combined_text(element):
 
 # convert the endnote xml to a dataframe
 def parse_xml(xml_file):
-    # Create element tree object
     try:
         tree = ET.parse(xml_file)
     except ET.ParseError as e:
         print(f"Error parsing XML file: {e}")
-        return pd.DataFrame()  # Return an empty DataFrame on error
+        return pd.DataFrame()
 
-    # Get root element
     root = tree.getroot()
-
-    # Create empty list for records
     records = []
 
-    # Iterate through each record in the XML file
     for item in root.findall('./records/record'):
-        # Create a dictionary to hold the data for this record
         record = {
             'rec-number': replace_newline(get_text(item.find('rec-number'))),
             'ref-type': replace_newline(get_text(item.find('ref-type'))),
@@ -137,37 +132,21 @@ def parse_xml(xml_file):
             'abstract': replace_newline(get_combined_text(item.find('abstract'))),
             'notes': replace_newline(get_combined_text(item.find('notes'))),
             'url': [replace_newline(get_combined_text(url)) for url in item.findall('urls/related-urls/url')],
-            #'url': replace_newline(get_combined_text(item.find('urls/related-urls/url'))),
             'electronic-resource-num': replace_newline(get_combined_text(item.find('electronic-resource-num'))),
             'remote-database-name': replace_newline(get_combined_text(item.find('remote-database-name')))
         }
-
-        # Append the record to the list
         records.append(record)
 
-    # Convert the list of records into a DataFrame
     df = pd.DataFrame(records)
-
     return df
 
 def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Adds a UI on top of a dataframe to let viewers filter columns.
-
-    Args:
-        df (pd.DataFrame): Original dataframe.
-
-    Returns:
-        pd.DataFrame: Filtered dataframe.
-    """
     modify = st.checkbox("Add filters")
-
     if not modify:
         return df
 
     df = df.copy()
 
-    # Convert datetimes into a standard format (datetime, no timezone)
     for col in df.columns:
         if is_object_dtype(df[col]):
             try:
@@ -188,10 +167,8 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             col_values = df[column]
 
             if col_values.apply(lambda x: isinstance(x, list)).any():
-                # Handle list-like columns by converting to tuples
                 col_values = col_values.apply(lambda x: tuple(x) if isinstance(x, list) else x)
 
-            # Treat columns with < 10 unique values as categorical
             if is_categorical_dtype(col_values) or col_values.nunique() < 10:
                 user_cat_input = right.multiselect(
                     f"Values for {column}",
@@ -234,59 +211,42 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 def create_app():
 
-    # Sidebar for navigation and logo
+    # Sidebar for navigation
     with st.sidebar:
-        # align vertical with main content using empty placeholders
         st.title("Publications Based on TCIA")
-        # Navigation selection
         page = st.radio("Select a TCIA publication report", [
             "Verified TCIA Data Usage Citations",
             "DataCite Citations and Page Views",
             "TCIA Staff Publications"
         ])
-
         st.caption("Tip: Plots are interactive. Hover over plots to activate controls that will appear in the top right corner of each plot.  Tables can be exported to CSV files.")
 
-    # Check if the button was clicked (via query parameter)
     if st.query_params.get("clear_cache") == "true":
-        # Clear the cache
         st.cache_data.clear()
         st.success("Cache cleared successfully!")
-        # Remove the query parameter to avoid repeated clearing
         st.query_params.clear()
 
-    # Load endnote data
     pubs_df = load_endnote_data()
-
-    # Load datacite data
     try:
         df = load_data()
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
         return
 
-    # Conditional rendering based on sidebar selection
     if page == "Verified TCIA Data Usage Citations":
         st.subheader("Verified TCIA Data Usage Citations")
-
         st.markdown("We perform regular literature reviews in order to distinguish papers which explicitly analyzed TCIA datasets from those that simply mention TCIA or its data in some capacity.  You can download an Endnote XML file containing these verified citations [here](https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml).  This file should be usable as input to your favorite reference management system.")
         st.markdown("Publication years represent the year the paper was published, not the year we added it to our reference library.  There is generally a significant lag time between when papers are published and when we find time to add them to our library due to the amount of effort required to assess each paper and verify our data was actually used.  If you've analyzed TCIA data and don’t see your publication on this list please [notify us](https://www.cancerimagingarchive.net/support/)!")
 
-        # Count publications per year
         pubs_per_year = pubs_df['year'].value_counts().sort_index()
-        # Calculate cumulative publications
         cumulative_pubs = pubs_per_year.cumsum()
 
-        # Create a dataframe with yearly totals in columns
         df_totals = pd.DataFrame({
             'Publications per Year': pubs_per_year,
             'Cumulative Publications': cumulative_pubs
-        }).T  # Transpose to make years column headers
-
-        # Rename the index to make it more descriptive
+        }).T
         df_totals.index.name = 'Metric'
 
-        # Create the chart
         fig = go.Figure()
         fig.add_trace(go.Bar(x=pubs_per_year.index, y=pubs_per_year.values, name='Yearly Citations'))
         fig.add_trace(go.Scatter(x=cumulative_pubs.index, y=cumulative_pubs.values, mode='lines+markers', name='Cumulative Citations', yaxis='y2'))
@@ -297,15 +257,9 @@ def create_app():
             barmode='group',
             legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
         )
-        # Show plot
         st.plotly_chart(fig)
 
-        # Display dataframe below the chart
-        st.dataframe(
-            df_totals,
-            use_container_width=True,
-            hide_index=False
-        )
+        st.dataframe(df_totals, use_container_width=True, hide_index=False)
 
         st.subheader("Explore Publications")
         st.markdown("Apply filters to our verified data usage citations and export subsets to CSV.  To export a CSV, mouse over the table and then use the download button in the top right corner.")
@@ -313,10 +267,8 @@ def create_app():
         filtered_endnote_explorer = filter_dataframe(pubs_df)
         st.dataframe(filtered_endnote_explorer)
 
-        # settings for dropdown menus that control how many authors/keywords in bar charts
         top_n_options = [10, 25, 50, 100]
 
-        # Top N Authors
         st.subheader(f'Top Authors by TCIA Publication Counts')
         col1, col2 = st.columns([1, 10])
         with col1:
@@ -329,7 +281,6 @@ def create_app():
         fig_authors.update_xaxes(tickangle=45)
         st.plotly_chart(fig_authors)
 
-        # Reference Type Distribution
         st.subheader('Reference Type Distribution')
         ref_type_counts = filtered_endnote_explorer['ref-type-name'].value_counts().reset_index()
         ref_type_counts.columns = ['Reference Type', 'Count']
@@ -337,143 +288,128 @@ def create_app():
         fig_ref_type.update_xaxes(tickangle=45)
         st.plotly_chart(fig_ref_type)
 
-        ### Possibly reintroduce keyword features later if source data are cleaned up
-        #
-        # count keywords for barchart and word cloud
-        #all_keywords = [keyword for sublist in filtered_endnote_explorer['keywords'] for keyword in sublist]
-        #keyword_counts = Counter(all_keywords)
-
-        # Top N Keywords
-        #st.subheader(f'Top Keywords')
-        #col1, col2 = st.columns([2, 10])
-        #with col1:
-        #    top_n_keywords = st.selectbox('Select top N keywords', options=top_n_options, index=2)
-        #top_keywords = pd.DataFrame(keyword_counts.most_common(top_n_keywords), columns=['Keyword', 'Count'])
-        #fig_keywords = px.bar(top_keywords, x='Keyword', y='Count', title=f'Top {top_n_keywords} Keywords')
-        #fig_keywords.update_xaxes(tickangle=45)
-        #st.plotly_chart(fig_keywords)
-
-        # Define the color palette
-        #colors = ['#5BC6FF', '#51A6FA', '#2467A8', '#042B5B']
-
-        # Create a custom color function
-        #def color_func(word, font_size, position, orientation, random_state=None, **kwargs):
-        #    return random.choice(colors)
-
-        # Word Cloud for Keywords
-        #st.subheader('Keyword Cloud')
-        #wordcloud = WordCloud(width=1600, height=800, color_func=color_func, background_color='#E9E9E9').generate_from_frequencies(keyword_counts)
-
-        # Create a Matplotlib figure with higher DPI
-        #plt.figure(figsize=(20, 10), dpi=300)  # Increase figure size and DPI
-        #plt.imshow(wordcloud, interpolation='bilinear')
-        #plt.axis('off')
-
-        # Display the word cloud in Streamlit
-        #st.pyplot(plt, dpi=300)  # Set DPI for Streamlit display
-
-
     elif page == "DataCite Citations and Page Views":
         st.title("DataCite Citations and Page Views")
         st.markdown("[DataCite](https://commons.datacite.org/repositories/nihnci.tcia) attempts to document all relationships between Digital Object Identifiers.  They also track metrics such as citation counts and page views as part of the [Make Data Count](https://makedatacount.org/) initiative. Statistics they've aggregated are summarized below, which includes information contributed by entities such as journals and other data repositories in addition to what TCIA submits.")
+        st.markdown("Note: Page view tracking began on **2024-11-01**. Monthly averages for page views are calculated from this date (or the dataset creation date, whichever is later). Monthly averages for citations are calculated from the dataset creation date.")
 
-        # Interactive table with citation details
-        st.subheader("Explore Page Views and Citation Counts")
+        # --- Metric Calculations ---
+        df['Created'] = pd.to_datetime(df['Created']).dt.tz_localize(None)
+        
+        PAGE_VIEW_START_DATE = pd.to_datetime('2024-11-01')
+        CURRENT_DATE = pd.Timestamp('now')
 
-        # Define the desired column order
+        # Citations (All Time)
+        df['MonthsExistence'] = (CURRENT_DATE.year - df['Created'].dt.year) * 12 + (CURRENT_DATE.month - df['Created'].dt.month) + 1
+        df['MonthsExistence'] = df['MonthsExistence'].apply(lambda x: max(x, 1))
+        df['CitationsMonthly'] = (df['CitationCount'] / df['MonthsExistence']).round(2)
+
+        # Page Views (Since Nov 2024)
+        df['EffectiveViewStart'] = df['Created'].apply(lambda x: max(x, PAGE_VIEW_START_DATE))
+        df['MonthsTracked'] = (CURRENT_DATE.year - df['EffectiveViewStart'].dt.year) * 12 + (CURRENT_DATE.month - df['EffectiveViewStart'].dt.month) + 1
+        df['MonthsTracked'] = df['MonthsTracked'].apply(lambda x: max(x, 1))
+        df['PageViewsMonthly'] = (df['ViewCount'] / df['MonthsTracked']).round(2)
+
+        # --- Display Table ---
         column_order = [
-            "DOI", "Identifier", "ViewCount", "CitationCount", "ReferenceCount", "URL", "Title",
-            "Related", "Created", "Updated", "Version", "Rights", "RightsURI", "CreatorNames",
-            "Description", "FundingReferences"
+            "DOI", "Identifier", "ViewCount", "PageViewsMonthly", "CitationCount", "CitationsMonthly", 
+            "ReferenceCount", "URL", "Title", "Related", "Created", "Updated", "Version", 
+            "Rights", "RightsURI", "CreatorNames", "Description", "FundingReferences"
         ]
+        available_cols = [col for col in column_order if col in df.columns]
+        df_display = df[available_cols].copy()
+        if "ViewCount" in df_display.columns:
+            df_display = df_display.sort_values(by="ViewCount", ascending=False)
+        df_display = df_display.reset_index(drop=True)
 
-        # Reorder the columns
-        df = df[column_order]
+        st.subheader("Explore Page Views and Citation Counts")
+        st.dataframe(filter_dataframe(df_display))
 
-        # Sort by ViewCount in descending order
-        df = df.sort_values(by="ViewCount", ascending=False)
+        # --- Treemaps ---
+        col_treemap1, col_treemap2 = st.columns(2)
 
-        # Reset the index (and drop the old index)
-        df = df.reset_index(drop=True)
+        with col_treemap1:
+            # Treemap: Page Views
+            # Note: We pass a LIST to hover_data to ensure strict index ordering in customdata
+            fig_views = px.treemap(
+                df,
+                path=['Identifier'],
+                values='PageViewsMonthly',
+                title='Monthly Average Page Views by Dataset',
+                hover_name='Title',
+                hover_data=['ViewCount', 'MonthsTracked', 'CitationCount']
+            )
+            # Customdata mappings:
+            # %{value} -> PageViewsMonthly
+            # %{customdata[0]} -> ViewCount
+            # %{customdata[1]} -> MonthsTracked
+            # %{customdata[2]} -> CitationCount
+            fig_views.update_traces(
+                hovertemplate="<b>%{hovertext}</b><br><br>" +
+                              "Avg Monthly Views: %{value}<br>" +
+                              "Total Views: %{customdata[0]}<br>" +
+                              "Months Tracked: %{customdata[1]}<br>" +
+                              "Total Citations: %{customdata[2]}<extra></extra>"
+            )
+            st.plotly_chart(fig_views, use_container_width=True)
 
-        st.dataframe(filter_dataframe(df))
+        with col_treemap2:
+            # Treemap: Citations
+            fig_citations = px.treemap(
+                df,
+                path=['Identifier'],
+                values='CitationsMonthly',
+                title='Monthly Average Citations by Dataset',
+                hover_name='Title',
+                hover_data=['CitationCount', 'MonthsExistence', 'ViewCount']
+            )
+            # Customdata mappings:
+            # %{value} -> CitationsMonthly
+            # %{customdata[0]} -> CitationCount
+            # %{customdata[1]} -> MonthsExistence
+            # %{customdata[2]} -> ViewCount
+            fig_citations.update_traces(
+                hovertemplate="<b>%{hovertext}</b><br><br>" +
+                              "Avg Monthly Citations: %{value}<br>" +
+                              "Total Citations: %{customdata[0]}<br>" +
+                              "Months Since Creation: %{customdata[1]}<br>" +
+                              "Total Views: %{customdata[2]}<extra></extra>"
+            )
+            st.plotly_chart(fig_citations, use_container_width=True)
 
-        # Bar chart comparing view counts for all datasets
-        # Sort by view count (highest to lowest)
-        sorted_by_views = df.sort_values('ViewCount', ascending=False)
-
-        fig_views = px.bar(
-            sorted_by_views,
-            x='Identifier',
-            y='ViewCount',
-            title='Page Views by Dataset',
-            labels={'Identifier': 'Dataset', 'ViewCount': 'Number of Views'},
-            hover_data=['CitationCount', 'URL', 'Title']
-        )
-        fig_views.update_layout(
-            xaxis_tickangle=-45,
-            height=500,
-            showlegend=False
-        )
-        st.plotly_chart(fig_views, use_container_width=True)
-
-        # Bar chart comparing citation counts for all datasets
-        # Sort by citation count (highest to lowest)
-        sorted_by_citations = df.sort_values('CitationCount', ascending=False)
-
-        fig_citations = px.bar(
-            sorted_by_citations,
-            x='Identifier',
-            y='CitationCount',
-            title='Citations by Dataset',
-            labels={'Identifier': 'Dataset', 'CitationCount': 'Number of Citations'},
-            hover_data=['ViewCount', 'URL', 'Title']
-        )
-        fig_citations.update_layout(
-            xaxis_tickangle=-45,
-            height=500,
-            showlegend=False
-        )
-        st.plotly_chart(fig_citations, use_container_width=True)
-
-        # Scatter plot comparing views vs citations
-        fig = px.scatter(
+        # --- Scatter Plot ---
+        fig_scatter = px.scatter(
             df,
             x='ViewCount',
             y='CitationCount',
             hover_data=['Identifier', 'URL', 'Title'],
-            title='Dataset Views vs Citations',
-            labels={'ViewCount': 'Number of Views', 'CitationCount': 'Number of Citations'}
+            title='Dataset Views vs Citations (Totals)',
+            labels={'ViewCount': 'Total Views', 'CitationCount': 'Total Citations'}
         )
-
-        # Add trendline
-        fig.add_trace(
-            go.Scatter(
-                x=df['ViewCount'],
-                y=df['ViewCount'].map(lambda x: np.polyval(np.polyfit(df['ViewCount'], df['CitationCount'], 1), x)),
-                name='Trend',
-                line=dict(color='red', dash='dash')
+        if len(df) > 1:
+            m, b = np.polyfit(df['ViewCount'], df['CitationCount'], 1)
+            fig_scatter.add_trace(
+                go.Scatter(
+                    x=df['ViewCount'],
+                    y=m * df['ViewCount'] + b,
+                    name='Trend',
+                    line=dict(color='red', dash='dash')
+                )
             )
-        )
-        fig.update_layout(height=600)
-        st.plotly_chart(fig, use_container_width=True)
+        fig_scatter.update_layout(height=600)
+        st.plotly_chart(fig_scatter, use_container_width=True)
 
 
     elif page == "TCIA Staff Publications":
         st.subheader("TCIA Staff Publications")
         st.markdown("This page summarizes publications about TCIA authored by our team members.")
-        # Wordpress URL
         WORDPRESS_URL = "https://www.cancerimagingarchive.net/publications-authored-by-tcia/"
 
         @st.cache_data
         def fetch_wordpress_page(url):
-            """
-            Fetches and parses the content of a WordPress page.
-            """
             response = requests.get(url)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.content, 'html.parser')
-                # Find the ordered list of publications
                 content = soup.find('ol')
                 if content:
                     return str(content)
@@ -483,7 +419,6 @@ def create_app():
                 st.error(f"Failed to fetch page: {response.status_code}")
                 return None
 
-        # Fetch and display the page
         page_content = fetch_wordpress_page(WORDPRESS_URL)
         if page_content:
             st.markdown(page_content, unsafe_allow_html=True)
@@ -497,7 +432,6 @@ def create_app():
             if st.button("🗑️ Clear Cache", help="Click to clear cached data"):
                 st.cache_data.clear()
                 st.success("Cache cleared successfully!")
-
 
 if __name__ == "__main__":
     create_app()
