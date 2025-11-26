@@ -17,9 +17,7 @@ import xml.etree.ElementTree as ET
 import re
 from collections import Counter
 from bs4 import BeautifulSoup
-#from wordcloud import WordCloud
-#import matplotlib.pyplot as plt
-import random
+import concurrent.futures
 
 st.set_page_config(page_title="Publications - The Cancer Imaging Archive (TCIA)", layout="wide")
 
@@ -81,6 +79,72 @@ def load_data():
     """Load TCIA dataset information using datacite"""
     df = datacite.getDoi()
     return df
+
+def fetch_single_doi_stats(doi):
+    """
+    Fetches usage stats for a single DOI via the DataCite REST API (/dois/ endpoint).
+    Returns a dictionary with views metrics.
+    """
+    # Using the specific DOI endpoint as requested
+    url = f"https://api.datacite.org/dois/{doi}"
+    
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            attributes = data.get('data', {}).get('attributes', {})
+            
+            # Extract viewsOverTime
+            views_over_time = attributes.get('viewsOverTime', [])
+            
+            # Filter for months with > 0 views
+            active_months_data = [item for item in views_over_time if item.get('total', 0) > 0]
+            
+            total_views = sum(item['total'] for item in active_months_data)
+            active_months_count = len(active_months_data)
+            
+            return {
+                'doi': doi,
+                'API_ViewCount': total_views,
+                'API_ActiveViewMonths': active_months_count
+            }
+            
+    except Exception as e:
+        pass
+        
+    return {
+        'doi': doi, 
+        'API_ViewCount': 0, 
+        'API_ActiveViewMonths': 0
+    }
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def fetch_datacite_stats_parallel(doi_list):
+    """
+    Fetches usage stats in parallel using ThreadPoolExecutor.
+    """
+    results = {}
+    progress_text = "Fetching detailed usage stats from DataCite..."
+    my_bar = st.progress(0, text=progress_text)
+    
+    # Using threads is efficient for I/O bound tasks like API requests
+    # Cap workers to 10-15 to be polite to the API
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_doi = {executor.submit(fetch_single_doi_stats, doi): doi for doi in doi_list}
+        
+        completed_count = 0
+        total_count = len(doi_list)
+        
+        for future in concurrent.futures.as_completed(future_to_doi):
+            data = future.result()
+            results[data['doi'].lower()] = data
+            
+            completed_count += 1
+            if completed_count % 5 == 0 or completed_count == total_count:
+                my_bar.progress(completed_count / total_count, text=f"{progress_text} ({completed_count}/{total_count})")
+    
+    my_bar.empty()
+    return results
 
 # Refresh cache based on TTL
 if should_refresh_cache(ttl=86400):  # Set TTL to 1 day
@@ -291,64 +355,85 @@ def create_app():
     elif page == "DataCite Citations and Page Views":
         st.title("DataCite Citations and Page Views")
         st.markdown("[DataCite](https://commons.datacite.org/repositories/nihnci.tcia) attempts to document all relationships between Digital Object Identifiers.  They also track metrics such as citation counts and page views as part of the [Make Data Count](https://makedatacount.org/) initiative. Statistics they've aggregated are summarized below, which includes information contributed by entities such as journals and other data repositories in addition to what TCIA submits.")
-        st.markdown("Note: Page view tracking began on **2024-11-01**. Monthly averages for page views are calculated from this date (or the dataset creation date, whichever is later). Monthly averages for citations are calculated from the dataset creation date.")
-
-        # --- Metric Calculations ---
-        df['Created'] = pd.to_datetime(df['Created']).dt.tz_localize(None)
         
-        PAGE_VIEW_START_DATE = pd.to_datetime('2024-11-01')
-        CURRENT_DATE = pd.Timestamp('now')
+        st.info("""
+        **Calculation Details:**
+        *   **Monthly Page Views:** Calculated as `Total Views / Active Months`. This is retrieved directly from DataCite's API by counting months where views > 0.
+        *   **Monthly Citations:** Calculated as `Total Citations / Months Since Creation`. This represents the dataset's long-term citation rate.
+        """)
 
-        # Citations (All Time)
+        # --- 1. Fetch & Calculate Metrics ---
+
+        # A. Page Views (from REST API /dois/, parallelized)
+        if 'DOI' in df.columns:
+            doi_list = df['DOI'].dropna().unique().tolist()
+            api_stats = fetch_datacite_stats_parallel(doi_list)
+            
+            # Map results
+            df['API_ViewCount'] = df['DOI'].apply(lambda x: api_stats.get(x.lower(), {}).get('API_ViewCount', 0))
+            df['API_ActiveViewMonths'] = df['DOI'].apply(lambda x: api_stats.get(x.lower(), {}).get('API_ActiveViewMonths', 0))
+            
+            # Filter: Drop rows with 0 page views
+            df = df[df['API_ViewCount'] > 0]
+            
+            # Calculate Monthly Views (Active Months Only) & Round to Whole Number
+            df['PageViewsMonthly'] = df.apply(
+                lambda row: int(round(row['API_ViewCount'] / row['API_ActiveViewMonths'])) if row['API_ActiveViewMonths'] > 0 else 0, 
+                axis=1
+            )
+        else:
+            st.warning("DOI column missing. Cannot fetch detailed stats.")
+            df['PageViewsMonthly'] = 0
+            df['API_ActiveViewMonths'] = 0
+
+        # B. Citations (Standard Age-based)
+        df['Created'] = pd.to_datetime(df['Created']).dt.tz_localize(None)
+        CURRENT_DATE = pd.Timestamp('now')
+        
+        # Months since creation (minimum 1 to avoid div/0)
         df['MonthsExistence'] = (CURRENT_DATE.year - df['Created'].dt.year) * 12 + (CURRENT_DATE.month - df['Created'].dt.month) + 1
         df['MonthsExistence'] = df['MonthsExistence'].apply(lambda x: max(x, 1))
+        
         df['CitationsMonthly'] = (df['CitationCount'] / df['MonthsExistence']).round(2)
 
-        # Page Views (Since Nov 2024)
-        df['EffectiveViewStart'] = df['Created'].apply(lambda x: max(x, PAGE_VIEW_START_DATE))
-        df['MonthsTracked'] = (CURRENT_DATE.year - df['EffectiveViewStart'].dt.year) * 12 + (CURRENT_DATE.month - df['EffectiveViewStart'].dt.month) + 1
-        df['MonthsTracked'] = df['MonthsTracked'].apply(lambda x: max(x, 1))
-        df['PageViewsMonthly'] = (df['ViewCount'] / df['MonthsTracked']).round(2)
-
-        # --- Display Table ---
+        # --- 2. Display Table ---
         column_order = [
-            "DOI", "Identifier", "ViewCount", "PageViewsMonthly", "CitationCount", "CitationsMonthly", 
+            "DOI", "Identifier", "API_ViewCount", "PageViewsMonthly", "API_ActiveViewMonths",
+            "CitationCount", "CitationsMonthly", "MonthsExistence",
             "ReferenceCount", "URL", "Title", "Related", "Created", "Updated", "Version", 
             "Rights", "RightsURI", "CreatorNames", "Description", "FundingReferences"
         ]
         available_cols = [col for col in column_order if col in df.columns]
         df_display = df[available_cols].copy()
-        if "ViewCount" in df_display.columns:
-            df_display = df_display.sort_values(by="ViewCount", ascending=False)
+        
+        # Rename for clarity
+        df_display = df_display.rename(columns={'API_ViewCount': 'TotalViews (API)'})
+        
+        if "TotalViews (API)" in df_display.columns:
+            df_display = df_display.sort_values(by="TotalViews (API)", ascending=False)
         df_display = df_display.reset_index(drop=True)
 
         st.subheader("Explore Page Views and Citation Counts")
         st.dataframe(filter_dataframe(df_display))
 
-        # --- Treemaps ---
+        # --- 3. Treemaps ---
         col_treemap1, col_treemap2 = st.columns(2)
 
         with col_treemap1:
             # Treemap: Page Views
-            # Note: We pass a LIST to hover_data to ensure strict index ordering in customdata
             fig_views = px.treemap(
                 df,
                 path=['Identifier'],
                 values='PageViewsMonthly',
-                title='Monthly Average Page Views by Dataset',
+                title='Monthly Average Page Views (Active Months Only)',
                 hover_name='Title',
-                hover_data=['ViewCount', 'MonthsTracked', 'CitationCount']
+                hover_data=['API_ViewCount', 'API_ActiveViewMonths', 'CitationCount']
             )
-            # Customdata mappings:
-            # %{value} -> PageViewsMonthly
-            # %{customdata[0]} -> ViewCount
-            # %{customdata[1]} -> MonthsTracked
-            # %{customdata[2]} -> CitationCount
             fig_views.update_traces(
                 hovertemplate="<b>%{hovertext}</b><br><br>" +
-                              "Avg Monthly Views: %{value}<br>" +
+                              "Avg Views/Month: %{value}<br>" +
                               "Total Views: %{customdata[0]}<br>" +
-                              "Months Tracked: %{customdata[1]}<br>" +
+                              "Active Months: %{customdata[1]}<br>" +
                               "Total Citations: %{customdata[2]}<extra></extra>"
             )
             st.plotly_chart(fig_views, use_container_width=True)
@@ -359,39 +444,35 @@ def create_app():
                 df,
                 path=['Identifier'],
                 values='CitationsMonthly',
-                title='Monthly Average Citations by Dataset',
+                title='Monthly Average Citations (Lifetime)',
                 hover_name='Title',
-                hover_data=['CitationCount', 'MonthsExistence', 'ViewCount']
+                hover_data=['CitationCount', 'MonthsExistence', 'API_ViewCount']
             )
-            # Customdata mappings:
-            # %{value} -> CitationsMonthly
-            # %{customdata[0]} -> CitationCount
-            # %{customdata[1]} -> MonthsExistence
-            # %{customdata[2]} -> ViewCount
             fig_citations.update_traces(
                 hovertemplate="<b>%{hovertext}</b><br><br>" +
-                              "Avg Monthly Citations: %{value}<br>" +
+                              "Avg Citations/Month: %{value}<br>" +
                               "Total Citations: %{customdata[0]}<br>" +
-                              "Months Since Creation: %{customdata[1]}<br>" +
+                              "Dataset Age (Months): %{customdata[1]}<br>" +
                               "Total Views: %{customdata[2]}<extra></extra>"
             )
             st.plotly_chart(fig_citations, use_container_width=True)
 
-        # --- Scatter Plot ---
+        # --- 4. Scatter Plot ---
+        # Using API_ViewCount for consistency with the new data source
         fig_scatter = px.scatter(
             df,
-            x='ViewCount',
+            x='API_ViewCount',
             y='CitationCount',
             hover_data=['Identifier', 'URL', 'Title'],
             title='Dataset Views vs Citations (Totals)',
-            labels={'ViewCount': 'Total Views', 'CitationCount': 'Total Citations'}
+            labels={'API_ViewCount': 'Total Views (API)', 'CitationCount': 'Total Citations'}
         )
         if len(df) > 1:
-            m, b = np.polyfit(df['ViewCount'], df['CitationCount'], 1)
+            m, b = np.polyfit(df['API_ViewCount'], df['CitationCount'], 1)
             fig_scatter.add_trace(
                 go.Scatter(
-                    x=df['ViewCount'],
-                    y=m * df['ViewCount'] + b,
+                    x=df['API_ViewCount'],
+                    y=m * df['API_ViewCount'] + b,
                     name='Trend',
                     line=dict(color='red', dash='dash')
                 )
