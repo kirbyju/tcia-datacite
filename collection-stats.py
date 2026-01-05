@@ -57,7 +57,7 @@ def load_datacite_data():
 # function to fetch DICOM searches
 @st.cache_data(ttl=86400)
 def load_dicom_searches():
-    df = pd.read_excel('https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/search_dicom_2025-04-07.xlsx')
+    df = pd.read_excel('https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/search_dicom_2026-01-02.xlsx')
 
     # Transpose the DataFrame
     transposed_df = df.transpose()  # or simply df.T
@@ -96,7 +96,7 @@ def load_dicom_searches():
 @st.cache_data(ttl=86400)
 def load_dicom_downloads():
     #url = "https://cancerimagingarchive.net/downloads_dicom.csv"
-    url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_dicom_2025-04-07.xlsx"
+    url = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_dicom_2026-01-02.xlsx"
     df = pd.read_excel(url)
 
     # Remove any unnamed columns that might be causing issues
@@ -178,7 +178,7 @@ def get_combined_text(element):
 @st.cache_data(ttl=86400)
 def load_and_process_aspera_data():
     # Read CSV, skip first row since it's junk
-    file = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_aspera_2025-04-09.xlsx"
+    file = "https://github.com/kirbyju/tcia-datacite/raw/refs/heads/main/downloads_aspera_2026-01-02.xlsx"
     df = pd.read_excel(file, skiprows=1)
     df['Unnamed: 0'] = df['Unnamed: 0'].ffill()
 
@@ -478,11 +478,11 @@ def create_app():
     #st.dataframe(complete_downloads)
 
     # Load DICOM search metrics
-    try:
-        dicom_search_df = load_dicom_searches()
-    except Exception as e:
-        st.error(f"Failed to load DICOM search metrics: {e}")
-        st.stop()
+    #try:
+    #    dicom_search_df = load_dicom_searches()
+    #except Exception as e:
+    #    st.error(f"Failed to load DICOM search metrics: {e}")
+    #    st.stop()
 
     # Load DICOM download metrics
     try:
