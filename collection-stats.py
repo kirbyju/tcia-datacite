@@ -508,7 +508,7 @@ def create_app():
 
     # Sidebar for navigation and logo
     with st.sidebar:
-        st.image("https://www.cancerimagingarchive.net/wp-content/uploads/2021/06/TCIA-Logo-01.png", use_container_width=True)
+        st.image("https://www.cancerimagingarchive.net/wp-content/uploads/2021/06/TCIA-Logo-01.png", width = "stretch")
 
         # Navigation selection with optional use of URL query parameters
         # Ensure the 'Identifier' column exists and get the unique values
@@ -646,7 +646,7 @@ def create_app():
     # Format text to show whole numbers
     fig_bar.update_traces(texttemplate="%{x:.0f}")
 
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.plotly_chart(fig_bar, width="stretch")
 
     # treemap grouped by year
     fig_treemap = px.treemap(
@@ -660,7 +660,7 @@ def create_app():
 
     st.subheader('Dataset Popularity Treemap (Grouped by Year of Publication)')
     st.markdown("This treemap visualizes page views grouped by the year each dataset was released. **The year in red is the year this dataset was published on TCIA**. Click on a year or dataset to zoom in.  Click the horizontal bar/space along the top of the plot to zoom back out.")
-    st.plotly_chart(fig_treemap, use_container_width=True)
+    st.plotly_chart(fig_treemap, width = "stretch")
 
     # dicom search stats
     #st.subheader("DICOM Searches Over Time (filter clicks)")
@@ -672,7 +672,7 @@ def create_app():
     #    title="Search Criteria Popularity by Category"
     #)
 
-    #st.plotly_chart(fig, use_container_width=True)
+    #st.plotly_chart(fig, width = "stretch")
 
     # dicom download stats
     st.subheader("DICOM Downloads Over Time (GBytes)")
@@ -743,7 +743,7 @@ def create_app():
                 margin=dict(b=80),  # Add some bottom margin for rotated labels
             )
 
-            st.plotly_chart(fig_time, use_container_width=True)
+            st.plotly_chart(fig_time, width = "stretch")
 
         else:
             # Calculate normalized downloads
@@ -778,7 +778,7 @@ def create_app():
                 margin=dict(b=80)  # Add some bottom margin for rotated labels
             )
 
-            st.plotly_chart(fig_time, use_container_width=True)
+            st.plotly_chart(fig_time, width = "stretch")
     else:
         st.warning(f'This dataset does not have any DICOM Downloads: {dataset}')
 
@@ -816,7 +816,7 @@ def create_app():
                 f"{viz_type}",
                 y_axis_title
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width = "stretch")
         else:
             st.warning(f'This dataset does not have any Non-DICOM Downloads: {dataset}')
 
@@ -897,7 +897,7 @@ def create_app():
         # Display dataframe below the chart
         st.dataframe(
             df_totals,
-            use_container_width=True,
+            width = "stretch",
             hide_index=False
         )
 
