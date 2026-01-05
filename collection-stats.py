@@ -530,7 +530,7 @@ def create_app():
 
         st.caption("Tip: Plots are interactive. Hover over plots to activate controls that will appear in the top right corner of each plot.  Tables can be exported to CSV files.")
 
-        st.markdown("Last updated: 2025-04-04")
+        st.markdown("Last updated: 2026-01-02")
 
         # Add manual refresh button
         #st.markdown("Source data refreshes daily, but can be manually updated using this button.")
