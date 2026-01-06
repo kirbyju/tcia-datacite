@@ -19,6 +19,7 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import re
 from collections import Counter
+import concurrent.futures
 #from wordcloud import WordCloud
 #import matplotlib.pyplot as plt
 
@@ -33,6 +34,72 @@ def get_apa_citation(doi):
         return response.text.strip()
     else:
         return "Error: DOI not found or not available in AMA format."
+
+def fetch_single_doi_stats(doi):
+    """
+    Fetches usage stats for a single DOI via the DataCite REST API (/dois/ endpoint).
+    Returns a dictionary with views metrics.
+    """
+    # Using the specific DOI endpoint as requested
+    url = f"https://api.datacite.org/dois/{doi}"
+
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            attributes = data.get('data', {}).get('attributes', {})
+
+            # Extract viewsOverTime
+            views_over_time = attributes.get('viewsOverTime', [])
+
+            # Filter for months with > 0 views
+            active_months_data = [item for item in views_over_time if item.get('total', 0) > 0]
+
+            total_views = sum(item['total'] for item in active_months_data)
+            active_months_count = len(active_months_data)
+
+            return {
+                'doi': doi,
+                'API_ViewCount': total_views,
+                'API_ActiveViewMonths': active_months_count
+            }
+
+    except Exception as e:
+        pass
+
+    return {
+        'doi': doi,
+        'API_ViewCount': 0,
+        'API_ActiveViewMonths': 0
+    }
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def fetch_datacite_stats_parallel(doi_list):
+    """
+    Fetches usage stats in parallel using ThreadPoolExecutor.
+    """
+    results = {}
+    progress_text = "Fetching detailed usage stats from DataCite..."
+    my_bar = st.progress(0, text=progress_text)
+
+    # Using threads is efficient for I/O bound tasks like API requests
+    # Cap workers to 10-15 to be polite to the API
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_doi = {executor.submit(fetch_single_doi_stats, doi): doi for doi in doi_list}
+
+        completed_count = 0
+        total_count = len(doi_list)
+
+        for future in concurrent.futures.as_completed(future_to_doi):
+            data = future.result()
+            results[data['doi'].lower()] = data
+
+            completed_count += 1
+            if completed_count % 5 == 0 or completed_count == total_count:
+                my_bar.progress(completed_count / total_count, text=f"{progress_text} ({completed_count}/{total_count})")
+
+    my_bar.empty()
+    return results
 
 # Endnote XML Data Loader
 @st.cache_data(ttl=86400)
@@ -553,26 +620,31 @@ def create_app():
         st.markdown("Please remember to always include the full dataset citation in your publication references to help ensure accurate usage metrics.")
 
     st.subheader("Page Views")
+
+    # A. Page Views (from REST API /dois/, parallelized)
+    if 'DOI' in df.columns:
+        doi_list = df['DOI'].dropna().unique().tolist()
+        api_stats = fetch_datacite_stats_parallel(doi_list)
+
+        # Map results
+        df['API_ViewCount'] = df['DOI'].apply(lambda x: api_stats.get(x.lower(), {}).get('API_ViewCount', 0))
+        df['API_ActiveViewMonths'] = df['DOI'].apply(lambda x: api_stats.get(x.lower(), {}).get('API_ActiveViewMonths', 0))
+    else:
+        st.warning("DOI column missing. Cannot fetch detailed stats.")
+        df['API_ViewCount'] = 0
+        df['API_ActiveViewMonths'] = 0
+
     # Create a copy of the original DataFrame
     page_views_df = df.copy()
 
     # Filter out rows with zero ViewCount
-    page_views_df = page_views_df[page_views_df['ViewCount'] > 0]
+    page_views_df = page_views_df[page_views_df['API_ViewCount'] > 0]
 
-    # Convert page views to monthly averages instead of cumulative totals
-    # Note: Page view tracking was implemented around Oct 2024 so treat everything created prior to Nov 2024 as "created" 11-1-2024
-    tracking_start_date = pd.to_datetime("2024-11-01").tz_localize(None)
-    today = pd.to_datetime(datetime.today().date())  # Current date when the app runs
-    page_views_df["Created"] = pd.to_datetime(page_views_df["Created"]).dt.tz_localize(None)
-
-
-    # use later of dates: created vs tracking_start_date
-    effective_created = page_views_df["Created"].apply(lambda d: max(d, tracking_start_date))
-
-    months_elapsed = (today.year - effective_created.dt.year) * 12 + (today.month - effective_created.dt.month)
-    months_elapsed = months_elapsed.clip(lower=1)
-
-    page_views_df["monthly_views"] = page_views_df["ViewCount"] / months_elapsed
+    # Calculate Monthly Views (Active Months Only) & Round to Whole Number
+    page_views_df['monthly_views'] = page_views_df.apply(
+        lambda row: int(round(row['API_ViewCount'] / row['API_ActiveViewMonths'])) if row['API_ActiveViewMonths'] > 0 else 0,
+        axis=1
+    )
 
     # Ensure selected dataset is available
     if dataset not in page_views_df['Identifier'].values:
